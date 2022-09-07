@@ -1,6 +1,8 @@
 package parse
 
-import "lwapp/src/common"
+import (
+	"lwapp/src/common"
+)
 
 func GetSupportUpdateType() map[string]int {
 	return map[string]int{

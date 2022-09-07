@@ -83,13 +83,13 @@ func StartWebServer(servicedParams *structure.ServicedParams) bool {
 	fmt.Printf("部署环境：%v \n", common.GetLwopsVolume())
 	fmt.Printf("启动服务，开始监听端口：%v\n", HttpServerPort)
 	err := s.ListenAndServe()
-	fmt.Println("发生错误：", err)
+	fmt.Println("服务退出，发生错误：", err)
 	return false
 }
 
 // 定时检查
 func runTimeCheck() {
-	t := time.NewTicker(time.Hour * 2)
+	t := time.NewTicker(time.Hour * 6)
 
 	for {
 		<-t.C

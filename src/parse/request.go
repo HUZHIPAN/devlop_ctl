@@ -69,11 +69,6 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 		return false
 	}
 
-	useUid := os.Getuid()
-	if useUid == 0 {
-		useUid = common.UseDefaultUserUid // 当前系统itops用户，uid不定
-	}
-
 	err := action.PreProcessMacros(map[string]string{
 		"{{$WEB_API_PORT}}": fmt.Sprintf("%d", params.WebApiPort),
 		"{{$WEB_PORT}}":     fmt.Sprintf("%d", params.WebPort),
@@ -81,7 +76,7 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 		"{{$BACKEND_API_GATEWAY}}": params.WebApiGateway,
 		"{{$PLACEHOLDER}}":         "",
 	}, map[string]string{
-		"{{$UID}}": fmt.Sprintf("%d", useUid),
+		"{{$UID}}": fmt.Sprintf("%d", action.GetUseRunContainerUserUid()),
 	})
 	if err != nil {
 		fmt.Println("容器启动配置etc配置预处理失败：", err)
@@ -115,8 +110,8 @@ func WebCommandHandle(params *structure.WebParams) bool {
 		ok := action.RunContainer()
 		if ok {
 			defer fmt.Println("启动成功！")
-			action.RunAppInitializationCommand()
 			ShowWebStatus()
+			action.RunAppInitializationCommand()
 		} else {
 			fmt.Println(diary.Ob_get_contents())
 			fmt.Println("启动失败！")
@@ -136,8 +131,8 @@ func WebCommandHandle(params *structure.WebParams) bool {
 		ok := action.RunContainer()
 		if ok {
 			fmt.Println("重启成功！")
-			action.RunAppInitializationCommand()
 			ShowWebStatus()
+			action.RunAppInitializationCommand()
 		} else {
 			fmt.Println(diary.Ob_get_contents())
 		}

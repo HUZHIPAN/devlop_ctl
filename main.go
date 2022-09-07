@@ -12,6 +12,10 @@ import (
 	"os"
 )
 
+var (
+	version string = "v1.0" // 工具版本
+)
+
 func main() {
 	globalParams := &structure.GlobalParams{}
 
@@ -31,7 +35,7 @@ func main() {
 	buildCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
 	buildCmd.IntVar(&buildParams.WebPort, "web-port", common.DefaultWebPort, "WEB前端端口")
 	buildCmd.IntVar(&buildParams.WebApiPort, "web-api-port", common.DefaultWebApiPort, "WEB后端服务端口")
-	buildCmd.StringVar(&buildParams.WebApiGateway, "web-api-gateway", "/backend_api", "配置前端访问后端的地址如（http://127.0.0.1:8081）")
+	buildCmd.StringVar(&buildParams.WebApiGateway, "web-api-gateway", "/backend_api", "配置后端服务访问的地址如（http://127.0.0.1:8081）")
 	buildCmd.StringVar(&buildParams.MacAddr, "mac-addr", "", "容器内绑定的网卡mac地址")
 
 	rollbackParams := &structure.RollbackParams{}
@@ -216,12 +220,13 @@ lwctl工具针对乐维web的部署环境初始化及持续可靠的版本更新
           在/dev工具操作版本更新，需要先开启lwctl的服务提供操作接口
                示例：lwctl serviced --daemon
 
+工具版本：%v
 其他维护或操作可查看下列支持的命令及子命令（可使用 lwctl 子命令 --help 获取使用帮助）：
 	`
 
-	fmt.Println(desc)
+	fmt.Printf(desc, version)
 	f := "%-10s %-30s %-40s\n"
-	fmt.Println("commands：")
+	fmt.Println("\n", "commands：")
 	fmt.Printf(f, "apply", "应用包更新（部署或更新）", "示例：lwctl apply -f package.tar.gz")
 	fmt.Printf(f, "build", "创建运行容器，配置端口、绑定mac地址等", "示例：lwctl build --help")
 	fmt.Printf(f, "app", "管理产品版本", "示例：lwctl app -c v6.0.1")

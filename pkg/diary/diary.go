@@ -65,10 +65,13 @@ func triggerLogFileReset() bool {
 		bakFilePath := filepath.Dir(defaultLogFile) + "/" + bakFileName
 		_, err := copyFile(defaultLogFile, bakFilePath)
 		if err != nil {
-			Errorf("复制备份lwctl日志文件发生错误：%v", err)
+			Errorf("复制备份lwctl日志文件（%v）发生错误：%v", defaultLogFile, err)
 			return false
 		}
-		os.Remove(defaultLogFile)
+		err = os.Truncate(defaultLogFile, 0)
+		if err != nil {
+			Errorf("清空lwctl日志文件（%v）发生错误：%v", defaultLogFile, err)
+		}
 		loadLogFile()
 		Infof("lwctl重置日志文件（%v）", defaultLogFile)
 		return true

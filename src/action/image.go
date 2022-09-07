@@ -6,8 +6,8 @@ import (
 	"lwapp/pkg/diary"
 	"lwapp/pkg/docker"
 	"lwapp/pkg/gogit"
-	"lwapp/pkg/util"
 	"lwapp/src/common"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -134,7 +134,7 @@ func RunContainerCommand(runCmd string, delay int) bool {
 	execLogMessage := fmt.Sprintf("\n%v 执行命令：>>>>>>>>>>>>>>>>>>>>>> %v", time.Now().Format("2006-01-02 15:04:05"), runCmd)
 
 	commandConfig := types.ExecConfig{
-		User:         util.GetCurrentRunUID(),
+		User:         fmt.Sprintf("%d", GetUseRunContainerUserUid()),
 		AttachStdin:  false,
 		AttachStderr: false,
 		AttachStdout: false,
@@ -171,7 +171,7 @@ func RunContainerShellScript(shFile string) bool {
 	execLogMessage := fmt.Sprintf("\n%v 执行脚本（%v）：>>>>>>>>>>>>>>>>>>>>>>>>>>>>", time.Now().Format("2006-01-02 15:04:05"), shFile)
 
 	commandConfig := types.ExecConfig{
-		User:         util.GetCurrentRunUID(),
+		User:         fmt.Sprintf("%d", GetUseRunContainerUserUid()),
 		AttachStdin:  false,
 		AttachStderr: false,
 		AttachStdout: false,
@@ -392,33 +392,11 @@ func RemoveWebContainer() bool {
 	}
 }
 
-/**
-func stopImageTagContainer(currentVersionNumber int) bool {
-	dock := docker.NewDockerClient()
-	opt := filters.NewArgs(filters.KeyValuePair{Key: "ancestor", Value: imageNamePrefix + fmt.Sprintf(":%v", currentVersionNumber)})
-	list, err := dock.ContainerList(context.TODO(), types.ContainerListOptions{Filters: opt, All: false})
-
-	if err != nil {
-		fmt.Println("获取启动容器列表失败:", err)
-		return false
+// 获取部署目录使用的用户权限uid
+func GetUseRunContainerUserUid() int {
+	useUid := os.Getuid()
+	if useUid == 0 {
+		useUid = common.UseDefaultUserUid // 当前系统itops用户，uid不定
 	}
-
-	d := docker.NewDockerClient()
-	var timeOut time.Duration = 10
-
-	for _, row := range list {
-		err := d.ContainerStop(context.TODO(), row.ID, &timeOut)
-		if err == nil {
-			fmt.Printf("关闭容器（%v）成功，ID:（%v）", row.Names, row.ID)
-		} else {
-			fmt.Printf("关闭容器（%v）失败，ID:（%v）", row.Names, row.ID)
-		}
-	}
-
-	if currentVersionNumber > 1 {
-		stopImageTagContainer(currentVersionNumber - 1)
-	}
-
-	return true
+	return useUid
 }
-*/
