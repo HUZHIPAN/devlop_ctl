@@ -27,7 +27,7 @@ func main() {
 	webParams := &structure.WebParams{}
 	webCmd := flag.NewFlagSet("web", flag.ExitOnError)
 	webCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
-	webCmd.StringVar(&webParams.Action, "s", "status", "操作（start|stop|restart|status）")
+	webCmd.StringVar(&webParams.Action, "s", "", "操作：（启动start| 停止stop| 重启restart| 查看status| 进入容器enter）")
 	webCmd.BoolVar(&webParams.WithRemove, "rm", false, "删除容器，仅支持stop时指定，如：lwctl web -s stop -rm")
 
 	buildParams := &structure.BuildParams{}

@@ -98,7 +98,7 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 
 // WEB容器状态管理（启动、停止、重启、查看），不包含创建WEB容器
 func WebCommandHandle(params *structure.WebParams) bool {
-	if !util.InArray(params.Action, []string{"start", "stop", "restart", "status"}) {
+	if !util.InArray(params.Action, []string{"start", "stop", "restart", "status", "enter"}) {
 		fmt.Printf("未知的操作：%v\n", params.Action)
 		return false
 	}
@@ -136,6 +136,15 @@ func WebCommandHandle(params *structure.WebParams) bool {
 		} else {
 			fmt.Println(diary.Ob_get_contents())
 		}
+
+	case "enter":
+		webContainer := action.GetCurrentExistWebContainer()
+		if webContainer == nil {
+			fmt.Println("当前部署目录未创建WEB容器！（使用 `lwctl build` 命令创建容器）")
+			return false
+		}
+		exitCode := util.RunCommandWithCli("docker", "exec", "-it", webContainer.ID, "bash")
+		fmt.Printf("已退出WEB容器，exitCode：%d \n", exitCode)
 	}
 
 	return true
@@ -165,7 +174,7 @@ func ShowWebStatus() {
 		fmt.Printf("创建时间：%v \n", time.Unix(webContainer.Created, 0).Format("2006-01-02 15:04:05"))
 		fmt.Printf("容器状态：%v \n", webContainer.Status)
 	} else {
-		defer fmt.Println("未创建WEB容器！（请使用 `lwctl build` 命令创建容器）")
+		defer fmt.Println("部署目录未创建WEB容器！（请使用 `lwctl build` 命令创建容器）")
 	}
 }
 

@@ -14,3 +14,10 @@ func TestGetLocalMac(t *testing.T) {
 func TestCheckPid(t *testing.T) {
 	CheckPid(15160)
 }
+
+func TestRunCommandWithCli(t *testing.T) {
+
+	// RunCommandWithCli("docker", "exec", "-it", "lwops_web_itops", "bash")
+	RunCommandWithCli("node")
+
+}
