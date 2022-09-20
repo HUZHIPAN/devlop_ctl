@@ -13,11 +13,11 @@ var (
 )
 
 var (
-	DefaultLwopsPath  string = "/itops"
-	DefaultWebPort    int    = 80
-	DefaultWebApiPort int    = 8081
+	DefaultLwopsPath  string = "/lwops" // 默认部署目录
+	DefaultWebPort    int    = 80	// 默认WEB前端访问端口
+	DefaultWebApiPort int    = 8081 // 默认WEB后端访问端口
 
-	DefaultUser string = "itops"
+	DefaultUser string = "itops"  // 当使用root用户部署时，默认使用的用户权限（不存在会创建）
 )
 
 // 忽略目录
@@ -98,13 +98,13 @@ func GetEtcPath() string {
 	return GetEnvironmentVolume() + "/etc"
 }
 
-func GetWebServerLogPath() string {
+func GetDeploymentLogPath() string {
 	return GetEnvironmentVolume() + "/logs"
 }
 
 // 获取web容器exec执行日志目录
 func GetWebExecLogPath() string {
-	return GetWebServerLogPath() + "/exec"
+	return GetDeploymentLogPath() + "/exec"
 }
 
 // web项目代码主目录

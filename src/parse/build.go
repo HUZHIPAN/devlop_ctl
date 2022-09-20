@@ -36,13 +36,13 @@ func GetDeployEnvParams() *structure.EnvironmentParams {
 	env := &structure.EnvironmentParams{}
 	err = yaml.Unmarshal(envContent, env)
 	if err != nil {
-		diary.Warningf("解析（%v）文件的环境配置发送错误：%v", err)
+		diary.Warningf("解析（%v）文件的环境配置发生错误：%v", err)
 	}
 	return env
 }
 
 // 生成环境配置信息
-func GenerateEnvBuildParams(params *structure.BuildParams) {
+func GenerateEnvBuildParams(params *structure.BuildParams, uid int) {
 	envFile := common.GetEnvironmentVolume() + "/.env"
 	var env *structure.EnvironmentParams
 	if !util.FileExists(envFile) {
@@ -57,7 +57,7 @@ func GenerateEnvBuildParams(params *structure.BuildParams) {
 	env.Build.WebApiGateWay = params.WebApiGateway
 	env.Build.MacAddr = params.MacAddr
 
-	env.Uid = os.Getuid()
+	env.Uid = uid
 
 	out, err := yaml.Marshal(env)
 	if err != nil {

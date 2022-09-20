@@ -5,7 +5,9 @@ type GlobalParams struct {
 }
 
 type ApplyParams struct {
-	PackagePath string
+	PackagePath     string
+	LoadWithAppPath string
+	LoadAppVersion  string
 }
 
 type WebParams struct {

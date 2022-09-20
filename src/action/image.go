@@ -6,6 +6,7 @@ import (
 	"lwapp/pkg/diary"
 	"lwapp/pkg/docker"
 	"lwapp/pkg/gogit"
+	"lwapp/pkg/util"
 	"lwapp/src/common"
 	"os"
 	"strconv"
@@ -254,7 +255,7 @@ func CreateContainer(params *structure.BuildParams) *types.Container {
 			Target: pvPath, // 数据持久化目录
 		}, {
 			Type:   mount.TypeBind,
-			Source: common.GetWebServerLogPath(),
+			Source: common.GetDeploymentLogPath(),
 			Target: "/itops/logs",
 		}},
 	}
@@ -293,9 +294,36 @@ func RunContainer() bool {
 
 	d := docker.NewDockerClient()
 
+	nginxStartStdoutFile := common.GetDeploymentLogPath() + "/nginx/nginx_stdout.log"
+	os.Remove(nginxStartStdoutFile)
 	err := d.ContainerStart(context.TODO(), webContainer.ID, types.ContainerStartOptions{})
 	if err != nil {
 		diary.Errorf("启动失败：容器启动失败：%v", err)
+		return false
+	}
+
+	beginStart := time.Now().Unix()
+	for {
+		// 轮询检查nginx启动输出
+		// 存在输出文件 或 5s超时 结束
+		if util.FileExists(nginxStartStdoutFile) {
+			time.Sleep(time.Millisecond * 100)
+			break
+		}
+		time.Sleep(time.Millisecond * 100)
+		if time.Now().Unix()-beginStart >= 5 {
+			break
+		}
+	}
+
+	out, err := os.ReadFile(nginxStartStdoutFile)
+	if err != nil {
+		fmt.Printf("WEB容器启动失败，没有nginx进程输出日志：%v\n", err)
+		return false
+	}
+
+	if string(out) != "" {
+		fmt.Printf("WEB容器进程nginx启动失败：%v \n", string(out))
 		return false
 	}
 

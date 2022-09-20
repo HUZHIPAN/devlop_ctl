@@ -120,7 +120,7 @@ func initCommitRepository(dirPath string) bool {
 }
 
 func checkEtcPathStatus() {
-	webServerlogPath := GetWebServerLogPath()
+	webServerlogPath := GetDeploymentLogPath()
 
 	if !util.FileExists(webServerlogPath) {
 		err := os.MkdirAll(webServerlogPath, os.ModePerm)
@@ -233,7 +233,7 @@ func ChownDirectoryPower(dirPath string) {
 	if UseDefaultUserUid <= 0 {
 		return
 	}
-	err := util.ChownAll(dirPath, UseDefaultUserUid, UseDefaultUserUid)
+	err := util.ChownAll(dirPath, UseDefaultUserUid, -1)
 	if err != nil {
 		diary.Warningf("设置目录（%v）所有者为（%v），uid：（%v）发生异常：%v！", dirPath, DefaultUser, UseDefaultUserUid, err.Error())
 	} else {

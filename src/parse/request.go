@@ -12,10 +12,26 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/docker/docker/api/types"
 )
 
 // 更新环境操作
 func ApplyCommandHandle(params *structure.ApplyParams) bool {
+	// 从已存在的lwjk_app目录加载项目
+	if params.LoadWithAppPath != "" && util.FileExists(params.LoadWithAppPath) {
+		diary.Infof("开始从已存在的项目lwjk_app目录（%v）加载，加载为版本号：%v", params.LoadWithAppPath, params.LoadAppVersion)
+		ok := action.ApplyWithExistDirectory(params.LoadWithAppPath, params.LoadAppVersion)
+		if !ok {
+			fmt.Printf("从目录（%v）加载产品代码失败！\n", params.LoadWithAppPath)
+			return false
+		}
+
+		fmt.Printf("从目录（%v）加载产品代码成功，版本号为：%v\n", params.LoadWithAppPath, params.LoadAppVersion)
+		return true
+	}
+
+	/************解析并更新包操作*************/
 	applyHandle := ParseRequestPackage(params.PackagePath)
 	if applyHandle == nil {
 		os.RemoveAll(getPackageFileUnpackPath(params.PackagePath))
@@ -69,6 +85,7 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 		return false
 	}
 
+	useUid := action.GetUseRunContainerUserUid()
 	err := action.PreProcessMacros(map[string]string{
 		"{{$WEB_API_PORT}}": fmt.Sprintf("%d", params.WebApiPort),
 		"{{$WEB_PORT}}":     fmt.Sprintf("%d", params.WebPort),
@@ -76,7 +93,7 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 		"{{$BACKEND_API_GATEWAY}}": params.WebApiGateway,
 		"{{$PLACEHOLDER}}":         "",
 	}, map[string]string{
-		"{{$UID}}": fmt.Sprintf("%d", action.GetUseRunContainerUserUid()),
+		"{{$UID}}": fmt.Sprintf("%d", useUid),
 	})
 	if err != nil {
 		fmt.Println("容器启动配置etc配置预处理失败：", err)
@@ -85,7 +102,10 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 
 	webContainer := action.CreateContainer(params)
 	if webContainer != nil {
-		GenerateEnvBuildParams(params)
+		if params.MacAddr == "" {
+			params.MacAddr = getContainerMacAddress(webContainer) // 记录生成的mac_addr
+		}
+		GenerateEnvBuildParams(params, useUid)
 		ShowWebStatus()
 		fmt.Println("创建容器成功：", webContainer.ID)
 		return true
@@ -161,9 +181,8 @@ func ShowWebStatus() {
 		if strings.Contains(webContainer.Status, "Up") {
 			fmt.Printf("使用端口：%v \n", webContainer.Ports)
 			defer fmt.Println("WEB容器正在运行中！")
-			endpointSetting := webContainer.NetworkSettings.Networks["bridge"]
-			if endpointSetting != nil {
-				fmt.Printf("物理地址（MAC地址）：%v \n", endpointSetting.MacAddress)
+			if macAddr := getContainerMacAddress(webContainer); macAddr != "" {
+				fmt.Printf("物理地址（MAC地址）：%v \n", macAddr)
 			}
 		} else {
 			defer fmt.Println("未启动WEB容器！（使用 `lwctl web -s start` 启动容器）")
@@ -176,6 +195,14 @@ func ShowWebStatus() {
 	} else {
 		defer fmt.Println("部署目录未创建WEB容器！（请使用 `lwctl build` 命令创建容器）")
 	}
+}
+
+func getContainerMacAddress(webContainer *types.Container) string {
+	endpointSetting := webContainer.NetworkSettings.Networks["bridge"]
+	if endpointSetting != nil {
+		return endpointSetting.MacAddress
+	}
+	return ""
 }
 
 // 回滚操作
