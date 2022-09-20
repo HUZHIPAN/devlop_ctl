@@ -21,3 +21,7 @@ func TestRunCommandWithCli(t *testing.T) {
 	RunCommandWithCli("node")
 
 }
+
+func TestCopyDirectoryAll(t *testing.T) {
+	CopyDirectoryAll("../../demo/kkk1", "../../demo/kkk2", []string{"56"}, []string{".php"})
+}

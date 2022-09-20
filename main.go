@@ -22,6 +22,8 @@ func main() {
 	applyParams := &structure.ApplyParams{}
 	applyCmd := flag.NewFlagSet("apply", flag.ExitOnError)
 	applyCmd.StringVar(&applyParams.PackagePath, "f", "", "更新包（只支持.tar.gz）")
+	applyCmd.StringVar(&applyParams.LoadWithAppPath, "load-path", "", "从已存在的项目（lwjk_app）目录加载项目")
+	applyCmd.StringVar(&applyParams.LoadAppVersion, "load-version", "v6.custom.exist", "加载已存在项目版本号")
 	applyCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
 
 	webParams := &structure.WebParams{}
