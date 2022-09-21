@@ -19,7 +19,6 @@ type BuildParams struct {
 	WebPort       int
 	WebApiPort    int
 	WebApiGateway string
-	MacAddr       string
 }
 
 type RollbackParams struct {

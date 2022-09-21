@@ -31,3 +31,17 @@ func RunCommandWithCli(cmdName string, arg ...string) int {
 	_ = cmd.Run()
 	return cmd.ProcessState.ExitCode()
 }
+
+// 执行命令，后台执行
+func RunCommandWithDaemon(cmdName string, arg ...string) error {
+	cmd := exec.Command(cmdName, arg...)
+	err := cmd.Start()
+	return err
+}
+
+// 执行命令，并等待命令退出
+func RunCommandAndWait(cmdName string, arg ...string) int {
+	cmd := exec.Command(cmdName, arg...)
+	_ = cmd.Run()
+	return cmd.ProcessState.ExitCode()
+}

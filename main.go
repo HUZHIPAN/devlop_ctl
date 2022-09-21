@@ -38,7 +38,6 @@ func main() {
 	buildCmd.IntVar(&buildParams.WebPort, "web-port", common.DefaultWebPort, "WEB前端端口")
 	buildCmd.IntVar(&buildParams.WebApiPort, "web-api-port", common.DefaultWebApiPort, "WEB后端服务端口")
 	buildCmd.StringVar(&buildParams.WebApiGateway, "web-api-gateway", "/backend_api", "配置后端服务访问的地址如（http://127.0.0.1:8081）")
-	buildCmd.StringVar(&buildParams.MacAddr, "mac-addr", "", "容器内绑定的网卡mac地址")
 
 	rollbackParams := &structure.RollbackParams{}
 	rollbackCmd := flag.NewFlagSet("rollback", flag.ExitOnError)

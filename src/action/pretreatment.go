@@ -18,7 +18,7 @@ var (
 // 根据一组宏值预处理
 // 每次预处理以不带 _active 后缀的分支开始
 // 将预处理后的文件变动提交的当前分支加 _active 后缀的分支
-func PreProcessMacros(vHostsMacros, webScriptMacros, startMacros map[string]string) error {
+func PreProcessMacros(vHostsMacros, webScriptMacros, startMacros ,runcConfMacros map[string]string) error {
 	CheckAndCommitEtcChange()
 	etcPath := common.GetEtcPath()
 	currentBranch := gogit.GetRepositoryCurrentBranch(etcPath)
@@ -79,6 +79,15 @@ func PreProcessMacros(vHostsMacros, webScriptMacros, startMacros map[string]stri
 		return err
 	} else {
 		diary.Infof("处理容器启动脚本（%v）宏替换成功，宏：%v", startScriptFile, webScriptMacros)
+	}
+
+	runcConfigFile := common.GetEtcRuncPath() + "/config.json"
+	err = replaceFileMacros(runcConfigFile, runcConfMacros)
+	if err != nil {
+		diary.Errorf("处理runc启动配置文件（%v）宏替换发生错误：%v，宏：%v", runcConfigFile, err, runcConfMacros)
+		return err
+	} else {
+		diary.Infof("处理runc启动配置文件（%v）宏替换成功，宏：%v", runcConfigFile, runcConfMacros)
 	}
 
 	changeList, err := gogit.RepositoryWorkSpaceStatus(etcPath, []string{})

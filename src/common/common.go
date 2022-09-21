@@ -88,6 +88,11 @@ func GetTmpPath() string {
 	return GetLwopsVolume() + "/tmp"
 }
 
+// 获取根文件系统路径
+func GetRootfsPath() string {
+	return GetEnvironmentVolume()+ "/rootfs"
+}
+
 // 部署工具运行时日志目录
 func GetTmpLogPath() string {
 	return GetTmpPath() + "/logs"
@@ -96,6 +101,11 @@ func GetTmpLogPath() string {
 // 运行环境配置目录
 func GetEtcPath() string {
 	return GetEnvironmentVolume() + "/etc"
+}
+
+// 获取runc文件目录
+func GetEtcRuncPath() string {
+	return GetEtcPath() + "/runc"
 }
 
 func GetDeploymentLogPath() string {

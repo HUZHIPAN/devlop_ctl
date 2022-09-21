@@ -58,14 +58,10 @@ func ApplyCommandHandle(params *structure.ApplyParams) bool {
 
 // 生成WEB容器和环境配置
 func BuildCommandHandle(params *structure.BuildParams) bool {
-	existContainer := action.GetCurrentExistWebContainer()
-	if existContainer != nil {
-		if action.RemoveWebContainer() {
-			fmt.Println("当前部署目录存在相关容器，已自动删除")
-		} else {
-			defer fmt.Println("当前部署目录存在相关容器，自动删除失败！")
-			return false
-		}
+	webContainer := action.GetCurrentRunningWebContainer()
+	if webContainer != nil {
+		fmt.Println("当前部署目录相关容器正在运行中！，请先手动停止容器运行！")
+		return false
 	}
 
 	currentImageNumber := action.GetLastWebImageTagNumber()
@@ -94,26 +90,21 @@ func BuildCommandHandle(params *structure.BuildParams) bool {
 		"{{$PLACEHOLDER}}":         "",
 	}, map[string]string{
 		"{{$UID}}": fmt.Sprintf("%d", useUid),
+	},map[string]string{
+		"{{$UID}}": fmt.Sprintf("%d", useUid),
+		"{{$LWJK_APP_PATH}}": common.GetLwappPath(),
+		"{{$WEB_ETC_PATH}}": common.GetEtcPath(),
+		"{{$WEB_LOGS_PATH}}": common.GetDeploymentLogPath(),
+		"{{$PersistenceVolumePATH}}": common.GetPersistenceVolume(),
 	})
 	if err != nil {
 		fmt.Println("容器启动配置etc配置预处理失败：", err)
 		return false
 	}
 
-	webContainer := action.CreateContainer(params)
-	if webContainer != nil {
-		if params.MacAddr == "" {
-			params.MacAddr = getContainerMacAddress(webContainer) // 记录生成的mac_addr
-		}
-		GenerateEnvBuildParams(params, useUid)
-		ShowWebStatus()
-		fmt.Println("创建容器成功：", webContainer.ID)
-		return true
-	} else {
-		fmt.Println(diary.Ob_get_contents())
-		fmt.Println("创建容器失败！")
-		return false
-	}
+	GenerateEnvBuildParams(params, useUid)
+	fmt.Printf("生成容器运行环境成功，生成配置：%v \n", params)
+	return true
 }
 
 // WEB容器状态管理（启动、停止、重启、查看），不包含创建WEB容器

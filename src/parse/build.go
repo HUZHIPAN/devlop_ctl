@@ -23,7 +23,7 @@ func IsExistDeployEnvSetting() bool {
 
 // 判断是否使用默认build参数
 func IsDefaultBuildParams(params *structure.BuildParams) bool {
-	return params.WebPort == common.DefaultWebPort && params.WebApiPort == common.DefaultWebApiPort && params.MacAddr == "" && params.WebApiGateway == "/backend_api"
+	return params.WebPort == common.DefaultWebPort && params.WebApiPort == common.DefaultWebApiPort && params.WebApiGateway == "/backend_api"
 }
 
 // 获取部署环境配置相关信息
@@ -55,7 +55,6 @@ func GenerateEnvBuildParams(params *structure.BuildParams, uid int) {
 	env.Build.WebPort = params.WebPort
 	env.Build.WebApiPort = params.WebApiPort
 	env.Build.WebApiGateWay = params.WebApiGateway
-	env.Build.MacAddr = params.MacAddr
 
 	env.Uid = uid
 
@@ -80,7 +79,6 @@ func BuildContainerByEnvParams() bool {
 		WebPort:       envParams.Build.WebPort,
 		WebApiPort:    envParams.Build.WebApiPort,
 		WebApiGateway: envParams.Build.WebApiGateWay,
-		MacAddr:       envParams.Build.MacAddr,
 	}
 
 	if BuildCommandHandle(buildParams) {

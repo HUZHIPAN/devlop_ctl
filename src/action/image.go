@@ -3,12 +3,14 @@ package action
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"lwapp/pkg/diary"
 	"lwapp/pkg/docker"
 	"lwapp/pkg/gogit"
 	"lwapp/pkg/util"
 	"lwapp/src/common"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,8 +31,6 @@ type ImageApplyResult struct {
 	ExistDiff bool
 }
 
-var imageNamePrefix = "lwapp_image_web"
-
 var WebRunContainerName = "lwops_web"
 
 func ImageUpdateApply(sourcePath string, event *EventPackage) *ImageApplyResult {
@@ -43,47 +43,35 @@ func ImageUpdateApply(sourcePath string, event *EventPackage) *ImageApplyResult 
 		return result
 	}
 
-	dock := docker.NewDockerClient()
-	err := dock.LoadImage(sourcePath + "/" + event.FileRelativePath)
-	if err != nil {
-		diary.Errorf("加载镜像时发生错误：%v", err)
-		return result
-	}
+	rootfsPackageFile := sourcePath+"/"+event.FileRelativePath
+	rootfsPath := common.GetRootfsPath()
 
 	imgTag := event.Name // 更新包镜像tag
 
-	currentTag := fmt.Sprintf("%v:%v", imageNamePrefix, currentVersionNumber) // 当前环境已存在的最新镜像tag
-
 	refreshAfterNumber := currentVersionNumber + 1
-	refreshAfterTag := fmt.Sprintf("%v:%v", imageNamePrefix, refreshAfterNumber)
 
-	imgID := dock.GetImageIdByTag(imgTag)
-	currentLatestImgID := dock.GetImageIdByTag(currentTag)
-	if imgID != "" && (imgID == currentLatestImgID) {
-		diary.Infof("加载镜像（%v）镜像ID：%v，与当前最新镜像tag（%v）ID一致，已略过", imgTag, imgID, currentTag)
+	if util.FileExists(fmt.Sprintf("%v/%d/%v", rootfsPath, currentVersionNumber, imgTag)) {
+		diary.Infof("加载镜像（%v），与当前最新镜像版本一致，已略过更新", imgTag)
 		result.ExistDiff = false
 	} else {
-		err = dock.ReTagImage(imgTag, refreshAfterTag)
-		if err != nil {
-			diary.Errorf("找不到对应的镜像（%v）或镜像tag错误：%v", imgTag, err)
-			return result
-		} else {
-			diary.Infof("加载镜像（%v）成功，重新打标签为（%v）", imgTag, refreshAfterTag)
+		exitCode := util.RunCommandAndWait("tar", "-xvf", rootfsPackageFile, "-C", fmt.Sprintf("%v/%d", rootfsPath, refreshAfterNumber))
+		if exitCode == 0 {
 			result.ExistDiff = true
+		} else {
+			diary.Errorf("更新镜像失败，执行tar命令解压发生错误，exitCode：%v", exitCode)
+			return result
 		}
 	}
 
 	result.IsSuccess = true
-
 	diary.Infof("更新镜像包成功")
 	return result
 }
 
 func RollbackLastImage() bool {
 	lastImageNumber := GetLastWebImageTagNumber()
-
 	dock := docker.NewDockerClient()
-	LastImageTag := fmt.Sprintf("%v:%v", imageNamePrefix, lastImageNumber)
+	LastImageTag := fmt.Sprintf("%v:%v", "", lastImageNumber)
 	err := dock.RemoveImage(LastImageTag)
 	if err != nil {
 		diary.Errorf("回滚最后一次加载的镜像失败：%v", err)
@@ -95,29 +83,31 @@ func RollbackLastImage() bool {
 }
 
 func GetLastWebImageTagNumber() int {
-	dock := docker.NewDockerClient()
-	opt := filters.NewArgs(filters.KeyValuePair{Key: "reference", Value: imageNamePrefix})
-	imageList, err := dock.ImageList(context.TODO(), types.ImageListOptions{Filters: opt})
+	var currentMaxVersionNumber int64 = 0
+	rootfsPath := common.GetRootfsPath()
+	err := filepath.WalkDir(rootfsPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		number, err := strconv.ParseInt(filepath.Base(path), 0, 64)
+		if err != nil {
+			return nil
+		}
+		if number > currentMaxVersionNumber {
+			currentMaxVersionNumber = number
+		}
+		return nil
+	})
+
 	if err != nil {
-		diary.Errorf("获取镜像列表发生错误：%v", err)
+		diary.Errorf("获取镜像目录版本失败：%v", err)
 		return -1
 	}
 
-	var currentMaxVersionNumber int64 = 0
-	for _, img := range imageList {
-		for _, repoTag := range img.RepoTags {
-			number, err := strconv.ParseInt(strings.TrimPrefix(repoTag, imageNamePrefix+":"), 0, 64)
-			if err != nil {
-				continue
-			}
-			if number > currentMaxVersionNumber {
-				currentMaxVersionNumber = number
-			}
-		}
-	}
 	if currentMaxVersionNumber == 0 {
 		diary.Errorf("未加载过基础运行镜像！")
 	}
+
 	return int(currentMaxVersionNumber)
 }
 
@@ -129,6 +119,9 @@ func RunContainerCommand(runCmd string, delay int) bool {
 		fmt.Printf("发送容器exec命令（%v）错误：没有运行中的WEB容器! \n", runCmd)
 		return false
 	}
+
+	// runcPath := common.GetEtcRuncPath()
+	// util.RunCommandWithDaemon(runcPath+"/runc", "--root", runcStatePath, "run")
 
 	execLogFileSuffix := time.Now().Format("2006-01-02") + ".txt"
 	execLogFile := "/itops/logs/exec/" + execLogFileSuffix
@@ -211,13 +204,13 @@ func CreateContainer(params *structure.BuildParams) *types.Container {
 	c := &container.Config{
 		// User:       util.GetCurrentRunUser(),
 		WorkingDir: "/itops/nginx/html/lwjk_app",
-		MacAddress: params.MacAddr,
+		MacAddress: "",
 		ExposedPorts: nat.PortSet{
 			nat.Port(webPortStr + "/tcp"):    {},
 			nat.Port(webApiPortStr + "/tcp"): {},
 		},
 		Cmd:   strslice.StrSlice{"sh", "/itops/etc/start.sh"},
-		Image: imageNamePrefix + ":" + fmt.Sprintf("%v", lastImageTagNumber),
+		Image: "" + ":" + fmt.Sprintf("%v", lastImageTagNumber),
 	}
 
 	pvPath := common.GetPersistenceVolume()
@@ -276,29 +269,25 @@ func CreateContainer(params *structure.BuildParams) *types.Container {
 
 // 启动web容器
 func RunContainer() bool {
-	webContainer := GetCurrentExistWebContainer()
-	if webContainer == nil {
-		diary.Errorf("未创建WEB容器，请先使用 lwctl build 命令创建容器！")
-		return false
-	}
-
-	if strings.Contains(webContainer.Status, "Up") {
+	webContainer := GetCurrentRunningWebContainer()
+	if webContainer != nil {
 		diary.Errorf("WEB容器已经已经在运行中！")
 		return false
 	}
 
-	if !strings.Contains(gogit.GetRepositoryCurrentBranch(common.GetEtcPath()), EtcBranchRuntimeSuffix) {
-		diary.Errorf("配置包etc存在更新，请重新生成容器（lwctl build）")
+	if !strings.HasSuffix(gogit.GetRepositoryCurrentBranch(common.GetEtcPath()),EtcBranchRuntimeSuffix) {
+		diary.Errorf("未生成运行配置，请先使用 lwctl build 命令创建运行环境配置！")
 		return false
 	}
 
-	d := docker.NewDockerClient()
-
 	nginxStartStdoutFile := common.GetDeploymentLogPath() + "/nginx/nginx_stdout.log"
 	os.Remove(nginxStartStdoutFile)
-	err := d.ContainerStart(context.TODO(), webContainer.ID, types.ContainerStartOptions{})
+
+	runcPath := common.GetEtcRuncPath()
+	runcStatePath := common.GetTmpPath() + "/runc"
+	err := util.RunCommandWithDaemon(runcPath+"/runc", "--root", runcStatePath, "run", WebRunContainerName+ GetCurrentPathEnvContainerSuffix())
 	if err != nil {
-		diary.Errorf("启动失败：容器启动失败：%v", err)
+		diary.Errorf("启动失败：调用runc失败：%v", err)
 		return false
 	}
 
@@ -376,7 +365,7 @@ func GetCurrentRunningWebContainer() *types.Container {
 }
 
 // 停止启动的web容器
-func StopContainer() bool {
+func StopContainer()
 	d := docker.NewDockerClient()
 	webContainer := GetCurrentRunningWebContainer()
 	if webContainer == nil {
