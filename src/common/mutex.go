@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"lwapp/pkg/util"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -12,7 +13,7 @@ import (
 // 当多个进程尝试设置同一个部署目录时，
 // 存在一个锁文件且pid对应进程未关闭，视为持有锁
 // 等待锁释放，再将当前进程pid写入锁文件
-func LockLwopsEnv() bool {
+func LockLwopsEnv() error {
 	lockFile := getLockFile()
 	content, _ := os.ReadFile(lockFile)
 
@@ -21,32 +22,30 @@ func LockLwopsEnv() bool {
 	if err != nil || existPID <= 0 {
 		existLock = false
 	} else {
-		existLock = util.CheckPid(existPID)
+		execute, _ := os.Executable()
+		existLock = util.CheckProcessIsRunning(existPID, filepath.Base(execute))
 	}
 
 	if existLock {
-		fmt.Printf("另一个进程持有部署目录操作锁，进程pid：%v \n", string(content))
-		return false
+		return fmt.Errorf("另一个进程持有部署目录操作锁，进程pid：%v", string(content))
 	}
 
 	_, err = util.WriteFileWithDir(lockFile, strconv.Itoa(os.Getpid()))
 	if err != nil {
-		fmt.Printf("无法写入锁文件（%v），error：%v \n", lockFile, err)
-		return false
-	} else {
-		return true
-	}
+		return fmt.Errorf("无法写入锁文件（%v），error：%v", lockFile, err)
+	} 
+
+	return nil
 }
 
 // 释放一个部署目录的持有锁
-// 主动调用 / 进程退出 视为释放锁
-func UnlockLwopsEnv() bool {
+// 主动调用解锁 / 进程退出 视为释放锁
+func UnlockLwopsEnv() error {
 	err := os.Remove(getLockFile())
 	if err != nil {
-		fmt.Printf("删除锁文件（%v）失败：%v \n", getLockFile(), err)
-		return false
+		return fmt.Errorf("删除锁文件（%v）失败：%v", getLockFile(), err)
 	}
-	return true
+	return nil
 }
 
 func getLockFile() string {

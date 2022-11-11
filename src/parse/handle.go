@@ -1,7 +1,7 @@
 package parse
 
 import (
-	"fmt"
+	"lwapp/pkg/diary"
 	"lwapp/src/action"
 	"lwapp/src/common"
 	"os"
@@ -69,13 +69,15 @@ func (h *ApplyHandle) LoadByEventPackages(eventPackages []action.EventPackage) {
 	}
 }
 
-func (h *ApplyHandle) execute() bool {
-
+func (h *ApplyHandle) Execute() bool {
 	action.CheckAndCommitLwappChange()
 	action.CheckAndCommitEtcChange()
 
-	existWebContainer := action.GetCurrentExistWebContainer() != nil          // 更新前存在创建的WEB容器
 	existRunningWebContainer := action.GetCurrentRunningWebContainer() != nil // 更新前存在运行中的WEB容器
+	if existRunningWebContainer && h.IsNeedToRestart() {
+		diary.Infof("当前部署目录（%v）存在运行中的容器，当前更新操作需要重启容器！", common.GetLwopsVolume())
+		action.StopContainer()
+	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(3)
@@ -115,24 +117,20 @@ func (h *ApplyHandle) execute() bool {
 		wg.Done()
 	}()
 
-	common.ChownDirectoryPower(common.GetLwopsVolume())
+	common.ChownDirectoryPower(common.GetDeploymentLogPath())
+
 	// 存在生成容器环境配置 并且 存在创建的WEB容器
-	if IsExistDeployEnvSetting() && existWebContainer {
+	if common.IsExistDeployEnvSetting() {
 		// 当前操作存在 镜像更新 或 配置包更新时 需要重新生成启动容器
 		if h.Action.Image != nil || h.Action.Configure != nil {
-			fmt.Printf("当前更新操作包含镜像或配置更新，尝试重新生成WEB容器\n")
-			if existRunningWebContainer {
-				action.StopContainer()
-			}
+			diary.Infof("当前更新操作包含镜像或配置更新，尝试重新生成运行配置")
+			BuildContainerByEnvParams()  // 根据当前环境配置重新生成容器
+		}
+	}
 
-			if BuildContainerByEnvParams() { // 根据当前环境配置重新生成容器
-				if existRunningWebContainer {
-					if action.RunContainer() { // 启动容器
-						action.RunAppInitializationCommand() // 发送初始化命令
-					}
-				}
-			}
-
+	if existRunningWebContainer && h.IsNeedToRestart() {
+		if action.RunContainer() { // 启动容器
+			action.RunAppInitializationCommand() // 发送初始化命令
 		}
 	}
 
@@ -140,14 +138,19 @@ func (h *ApplyHandle) execute() bool {
 	commands := h.RequestParams.Metadata.Commands
 	if len(commands) > 0 && existRunningWebContainer {
 		for i, command := range commands {
-			action.RunContainerCommand(command, (i+1)*5) // 每条命令之间间隔5s执行，防止并行
+			action.RunContainerCommand(command, false,(i+1)*5) // 每条命令之间间隔5s执行，防止并行
 		}
 	}
 
 	if len(commands) > 0 && !existRunningWebContainer {
-		fmt.Printf("当前环境不存在运行中的容器，已忽略commands执行：%v \n", commands)
+		diary.Infof("当前环境不存在运行中的容器，已忽略commands执行：%v", commands)
 	}
 
 	wg.Wait()
 	return true
+}
+
+// 此次更新是否需要重启
+func (h *ApplyHandle) IsNeedToRestart() bool {
+	return h.Action.Configure != nil || h.Action.Image != nil || h.Action.Product != nil
 }

@@ -57,11 +57,13 @@ func SetLwopsVolume(opsPath string) bool {
 	}
 	lwopsPath = opsPathAbsolute
 
-	if !LockLwopsEnv() {
+	if err = LockLwopsEnv(); err != nil {
+		fmt.Println(err)
 		fmt.Println("无法对部署目录加锁，可能其他进程正在操作，请检查！")
 		return false
 	}
 
+	// 调用SetLogPath后可使用diary记录日志
 	diary.SetLogPath(GetTmpLogPath())
 
 	diary.Infof("部署目录：%v", lwopsPath)
@@ -79,7 +81,7 @@ func GetPersistenceVolume() string {
 }
 
 // 环境/代码 目录
-func GetEnvironmentVolume() string {
+func GetDeploymentVolume() string {
 	return GetLwopsVolume() + "/deployment"
 }
 
@@ -88,9 +90,14 @@ func GetTmpPath() string {
 	return GetLwopsVolume() + "/tmp"
 }
 
+// 部署工具运行时runc目录
+func GetTmpRuncPath() string {
+	return GetTmpPath() + "/runc"
+}
+
 // 获取根文件系统路径
 func GetRootfsPath() string {
-	return GetEnvironmentVolume()+ "/rootfs"
+	return GetDeploymentVolume()+ "/rootfs"
 }
 
 // 部署工具运行时日志目录
@@ -100,7 +107,7 @@ func GetTmpLogPath() string {
 
 // 运行环境配置目录
 func GetEtcPath() string {
-	return GetEnvironmentVolume() + "/etc"
+	return GetDeploymentVolume() + "/etc"
 }
 
 // 获取runc文件目录
@@ -109,7 +116,7 @@ func GetEtcRuncPath() string {
 }
 
 func GetDeploymentLogPath() string {
-	return GetEnvironmentVolume() + "/logs"
+	return GetDeploymentVolume() + "/logs"
 }
 
 // 获取web容器exec执行日志目录
@@ -119,7 +126,7 @@ func GetWebExecLogPath() string {
 
 // web项目代码主目录
 func GetLwappPath() string {
-	return GetEnvironmentVolume() + "/lwjk_app"
+	return GetDeploymentVolume() + "/lwjk_app"
 }
 
 // 获取lwjk_app忽略管控的文件和目录

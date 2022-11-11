@@ -11,9 +11,9 @@ func TestRunContainer(t *testing.T) {
 }
 
 func TestRunContainerCommand(t *testing.T) {
-	RunContainerCommand("php -v", 1)
+	// RunContainerCommand("php -v", 1)
 }
 
 func TestRunContainerShellScript(t *testing.T) {
-	RunContainerShellScript("/itops/init.sh")
+	// RunContainerShellScript("/itops/init.sh")
 }

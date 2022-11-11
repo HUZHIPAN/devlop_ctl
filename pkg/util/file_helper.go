@@ -27,6 +27,22 @@ func IsExists(path string) (os.FileInfo, bool) {
 	return f, err == nil || os.IsExist(err)
 }
 
+// 获取目录下的列表（一层）
+func GetDirFileList(dirPath string) []fs.FileInfo {
+    f,err := os.OpenFile(dirPath, os.O_RDONLY,os.ModeDir)
+    if err != nil {
+		return []fs.FileInfo{}
+	}
+	defer f.Close()
+	
+	//读取目录项
+	fileList,err := f.Readdir(-1) //-1读取目录中的所有目录项
+	if err != nil{
+		return []fs.FileInfo{}
+	}
+	return fileList
+}
+
 // 判断所给路径是否为文件夹
 func IsDir(path string) (os.FileInfo, bool) {
 	f, flag := IsExists(path)

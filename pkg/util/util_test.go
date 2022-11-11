@@ -12,7 +12,7 @@ func TestGetLocalMac(t *testing.T) {
 }
 
 func TestCheckPid(t *testing.T) {
-	CheckPid(15160)
+	// CheckPid(15160, "lwctl")
 }
 
 func TestRunCommandWithCli(t *testing.T) {
@@ -24,4 +24,8 @@ func TestRunCommandWithCli(t *testing.T) {
 
 func TestCopyDirectoryAll(t *testing.T) {
 	CopyDirectoryAll("../../demo/kkk1", "../../demo/kkk2", []string{"56"}, []string{".php"})
+}
+
+func TestRunCommandWithDaemon(t *testing.T) {
+	RunCommandWithDaemon("ping", "127.0.0.1")
 }

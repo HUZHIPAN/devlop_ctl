@@ -90,6 +90,7 @@ func (tp *TgzPacker) Pack(sourceFullPath string, tarFileName string) (err error)
 	return tp.tarFile(sourceFullPath, tarWriter)
 }
 
+
 // tarFileName为待解压的tar包，dstDir为解压的目标目录, ignorePath为解压时忽略的路径前缀
 func (tp *TgzPacker) UnPack(tarFileName string, dstDir string, ignorePrefix, ignoreSuffix []string) (err error) {
 	if openTimeCost {
@@ -127,6 +128,7 @@ func (tp *TgzPacker) UnPack(tarFileName string, dstDir string, ignorePrefix, ign
 
 	// 创建tar reader
 	tarReader := tar.NewReader(gr)
+
 	// 循环读取
 	for {
 		header, err := tarReader.Next()
@@ -168,7 +170,7 @@ func (tp *TgzPacker) UnPack(tarFileName string, dstDir string, ignorePrefix, ign
 		case tar.TypeDir:
 			// 是目录，不存在则创建
 			if exists := tp.dirExists(targetFullPath); !exists {
-				if err = os.MkdirAll(targetFullPath, 0755); err != nil {
+				if err = os.MkdirAll(targetFullPath, header.FileInfo().Mode()); err != nil {
 					return err
 				}
 			}

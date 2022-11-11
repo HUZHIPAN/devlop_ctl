@@ -5,6 +5,7 @@ import (
 	"lwapp/pkg/gogit"
 	"lwapp/src/common"
 	"lwapp/src/parse"
+	"lwapp/src/structure"
 	"os"
 	"os/exec"
 	"strings"
@@ -41,6 +42,119 @@ func UploadPackage(c *gin.Context) {
 		})
 	}
 }
+
+// 应用一个已经上传的更新包
+func ApplyWithUploadedPackage(c *gin.Context) {
+	packageName := c.PostForm("package") // 已经上传至指定目录的包名
+	packagePath := path.Join(parse.GetRequestPackagePath(), packageName)
+
+	if err := common.LockLwopsEnv(); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":   false,
+			"msg":      err.Error(),
+			"audit": "",
+		})
+		return
+	}
+	diary.Ob_Start()
+	applyHandle := parse.ParseRequestPackage(packagePath)
+	if applyHandle == nil {
+		os.RemoveAll(parse.GetPackageFileUnpackPath(packagePath))
+		diary.Infof("更新包校验失败！")
+		c.JSON(http.StatusOK, gin.H{
+			"status":   false,
+			"msg":      diary.Ob_get_contents(),
+			"audit": "",
+		})
+		return
+	}
+
+	diary.Infof("解析yaml配置：%v", applyHandle.GetYamlDesc())
+	applyHandle.Execute()
+	common.UnlockLwopsEnv()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":   true,
+		"msg":      "",
+		"audit": diary.Ob_get_contents(),
+	})
+	diary.Ob_End()
+}
+
+
+// 切换产品更新版本分支
+func RollbackAppBranch(c *gin.Context) {
+	branchName := c.PostForm("version")
+
+	if err := common.LockLwopsEnv(); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":   false,
+			"msg":      err.Error(),
+			"audit": "",
+		})
+		return
+	}
+	diary.Ob_Start()
+	ok := parse.AppCommandHandle(&structure.AppParams{
+		ShowVersionList: false,
+		ToVersion: branchName,
+	})
+
+	var msg string
+	if ok {
+		msg = "操作成功"
+	} else {
+		msg = "操作失败！"
+	}
+
+	common.UnlockLwopsEnv()
+	c.JSON(http.StatusOK, gin.H{
+		"status":   ok,
+		"msg":      msg,
+		"audit": diary.Ob_get_contents(),
+	})
+	diary.Ob_End()
+}
+
+
+// 切换配置包更新版本分支
+func RollbackEtcBranch(c *gin.Context) {
+	branchName := c.PostForm("version")
+
+	if err := common.LockLwopsEnv(); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":   false,
+			"msg":      err.Error(),
+			"audit": "",
+		})
+		return
+	}
+
+	diary.Ob_Start()
+	ok := parse.EtcCommandHandle(&structure.EtcParams{
+		ShowVersionList: false,
+		ToVersion: branchName,
+		WithBuild: true,
+	})
+
+	var msg string
+	if ok {
+		msg = "操作成功"
+	} else {
+		msg = "操作失败！"
+	}
+	common.UnlockLwopsEnv()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":   ok,
+		"msg":      msg,
+		"audit": diary.Ob_get_contents(),
+	})
+	diary.Ob_End()
+}
+
+
+
 
 // 执行命令
 func ProxyCall(c *gin.Context) {

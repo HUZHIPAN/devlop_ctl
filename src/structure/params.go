@@ -33,10 +33,12 @@ type AppParams struct {
 type EtcParams struct {
 	ShowVersionList bool
 	ToVersion       string
+	WithBuild bool // 切换后是否生成环境参数
 }
 
 type ExecParams struct {
 	Command string
+	IsBackstage bool
 }
 
 type ServicedParams struct {

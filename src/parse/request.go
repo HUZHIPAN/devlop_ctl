@@ -12,8 +12,6 @@ import (
 	"path"
 	"strings"
 	"time"
-
-	"github.com/docker/docker/api/types"
 )
 
 // 更新环境操作
@@ -23,36 +21,36 @@ func ApplyCommandHandle(params *structure.ApplyParams) bool {
 		diary.Infof("开始从已存在的项目lwjk_app目录（%v）加载，加载为版本号：%v", params.LoadWithAppPath, params.LoadAppVersion)
 		ok := action.ApplyWithExistDirectory(params.LoadWithAppPath, params.LoadAppVersion)
 		if !ok {
-			fmt.Printf("从目录（%v）加载产品代码失败！\n", params.LoadWithAppPath)
+			diary.Infof("从目录（%v）加载产品代码失败！", params.LoadWithAppPath)
 			return false
 		}
 
-		fmt.Printf("从目录（%v）加载产品代码成功，版本号为：%v\n", params.LoadWithAppPath, params.LoadAppVersion)
+		diary.Infof("从目录（%v）加载产品代码成功，版本号为：%v", params.LoadWithAppPath, params.LoadAppVersion)
 		return true
 	}
 
 	/************解析并更新包操作*************/
 	applyHandle := ParseRequestPackage(params.PackagePath)
 	if applyHandle == nil {
-		os.RemoveAll(getPackageFileUnpackPath(params.PackagePath))
-		fmt.Println("更新包校验失败！")
+		os.RemoveAll(GetPackageFileUnpackPath(params.PackagePath))
+		diary.Errorf("更新包校验失败！")
 		return false
 	}
 
 	diary.Infof("解析yaml配置：%v", applyHandle.GetYamlDesc())
-	applyHandle.execute()
+	applyHandle.Execute()
 
-	defer fmt.Println("更新操作完成！")
-
-	currentTimeStr := time.Now().Format("2006-01-02_15_04_05")
-	auditFileName := strings.TrimSuffix(path.Base(params.PackagePath), ".tar.gz") + "_apply_audit_" + currentTimeStr
+	auditFileName := strings.TrimSuffix(path.Base(params.PackagePath), ".tar.gz") + "_apply_audit_" + time.Now().Format("2006-01-02_15_04_05")
 	auditFileNamePath := common.GetTmpPath() + "/logs/" + auditFileName + ".txt"
 	ok, err := util.WriteFileWithDir(auditFileNamePath, diary.Ob_get_contents())
 	if err != nil || !ok {
-		defer fmt.Println("更新审计保存失败：", err)
+		diary.Infof("更新审计保存失败：%v", err)
+	} else {
+		diary.Infof("审计文件：%v", auditFileNamePath)
 	}
 
-	defer fmt.Println("审计文件：", auditFileNamePath)
+
+	diary.Infof("更新操作完成！")
 	return true
 }
 
@@ -60,153 +58,149 @@ func ApplyCommandHandle(params *structure.ApplyParams) bool {
 func BuildCommandHandle(params *structure.BuildParams) bool {
 	webContainer := action.GetCurrentRunningWebContainer()
 	if webContainer != nil {
-		fmt.Println("当前部署目录相关容器正在运行中！，请先手动停止容器运行！")
+		diary.Warningf("当前部署目录相关容器正在运行中！，请先手动停止容器运行！")
 		return false
 	}
 
 	currentImageNumber := action.GetLastWebImageTagNumber()
 	if currentImageNumber <= 0 {
-		fmt.Println("当前部署环境缺少image镜像包，请先更新基础镜像包！")
+		diary.Warningf("当前部署环境缺少image镜像包，请先更新基础镜像包！")
 		return false
 	}
 
 	etcCurrentBranch := gogit.GetRepositoryCurrentBranch(common.GetEtcPath())
 	if etcCurrentBranch == "" || etcCurrentBranch == "master" {
-		fmt.Println("当前部署目录缺少configure配置包，请先更新配置包！")
+		diary.Warningf("当前部署目录缺少configure配置包，请先更新配置包！")
 		return false
 	}
 
 	if !util.FileExists(common.GetPersistenceVolume()) {
-		fmt.Printf("持久化目录（%v）不存在，请确保当前环境已经更新过产品包！\n", common.GetPersistenceVolume())
+		diary.Warningf("持久化目录（%v）不存在，请确保当前环境已经更新过产品包！", common.GetPersistenceVolume())
 		return false
 	}
 
 	useUid := action.GetUseRunContainerUserUid()
 	err := action.PreProcessMacros(map[string]string{
-		"{{$WEB_API_PORT}}": fmt.Sprintf("%d", params.WebApiPort),
-		"{{$WEB_PORT}}":     fmt.Sprintf("%d", params.WebPort),
+		"{{$WEB_API_PORT}}":         fmt.Sprintf("%d", params.WebApiPort),
+		"{{$WEB_PORT}}":             fmt.Sprintf("%d", params.WebPort),
+		"{{$PHPFPM_LISTEN_SOCKET}}": common.GetPhpfpmSocketListenFile(),
 	}, map[string]string{
 		"{{$BACKEND_API_GATEWAY}}": params.WebApiGateway,
 		"{{$PLACEHOLDER}}":         "",
 	}, map[string]string{
 		"{{$UID}}": fmt.Sprintf("%d", useUid),
-	},map[string]string{
-		"{{$UID}}": fmt.Sprintf("%d", useUid),
-		"{{$LWJK_APP_PATH}}": common.GetLwappPath(),
-		"{{$WEB_ETC_PATH}}": common.GetEtcPath(),
-		"{{$WEB_LOGS_PATH}}": common.GetDeploymentLogPath(),
+	}, map[string]string{
+		"{{$IMAGE_ROOTFS_PATH}}":     fmt.Sprintf("%v/%v", common.GetRootfsPath(), action.GetLastWebImageTagNumber()),
+		"{{$UID}}":                   fmt.Sprintf("%d", useUid),
+		"{{$LWJK_APP_PATH}}":         common.GetLwappPath(),
+		"{{$WEB_ETC_PATH}}":          common.GetEtcPath(),
+		"{{$WEB_LOGS_PATH}}":         common.GetDeploymentLogPath(),
 		"{{$PersistenceVolumePATH}}": common.GetPersistenceVolume(),
+	}, map[string]string{
+		"{{$PHPFPM_LISTEN_SOCKET}}": common.GetPhpfpmSocketListenFile(),
 	})
+
 	if err != nil {
-		fmt.Println("容器启动配置etc配置预处理失败：", err)
+		diary.Errorf("容器启动配置etc配置预处理失败：", err)
 		return false
 	}
 
 	GenerateEnvBuildParams(params, useUid)
-	fmt.Printf("生成容器运行环境成功，生成配置：%v \n", params)
+	diary.Infof("生成容器运行环境配置：%+v ", *params)
+	diary.Infof("\n生成环境配置成功！")
 	return true
 }
 
 // WEB容器状态管理（启动、停止、重启、查看），不包含创建WEB容器
 func WebCommandHandle(params *structure.WebParams) bool {
 	if !util.InArray(params.Action, []string{"start", "stop", "restart", "status", "enter"}) {
-		fmt.Printf("未知的操作：%v\n", params.Action)
+		diary.Warningf("未知的操作：%v\n", params.Action)
 		return false
 	}
 
 	switch params.Action {
 	case "status":
-		ShowWebStatus()
+		running := ShowWebStatus()
+		if running {
+			diary.Infof("\n容器正在运行中！")
+		} else {
+			diary.Infof("\n当前部署目录容器未启动！")
+		}
 	case "start":
 		ok := action.RunContainer()
 		if ok {
-			defer fmt.Println("启动成功！")
 			ShowWebStatus()
 			action.RunAppInitializationCommand()
+			diary.Infof("\n启动成功！")
 		} else {
-			fmt.Println(diary.Ob_get_contents())
-			fmt.Println("启动失败！")
+			diary.Errorf("\n启动失败！")
 		}
-
 	case "stop":
 		stopOk := action.StopContainer()
+		diary.Infof("")
 		if stopOk {
-			fmt.Println("关闭容器成功")
+			diary.Infof("关闭容器成功！")
 		}
-		if params.WithRemove {
-			action.RemoveWebContainer()
-		}
-
 	case "restart":
 		_ = action.StopContainer()
 		ok := action.RunContainer()
 		if ok {
-			fmt.Println("重启成功！")
 			ShowWebStatus()
 			action.RunAppInitializationCommand()
+			diary.Infof("\n重启成功！")
 		} else {
-			fmt.Println(diary.Ob_get_contents())
+			diary.Errorf("\n重启发生错误！")
 		}
 
 	case "enter":
-		webContainer := action.GetCurrentExistWebContainer()
+		webContainer := action.GetCurrentRunningWebContainer()
 		if webContainer == nil {
-			fmt.Println("当前部署目录未创建WEB容器！（使用 `lwctl build` 命令创建容器）")
+			diary.Warningf("当前部署目录WEB容器未启动！")
 			return false
 		}
-		exitCode := util.RunCommandWithCli("docker", "exec", "-it", webContainer.ID, "bash")
-		fmt.Printf("已退出WEB容器，exitCode：%d \n", exitCode)
+		common.UnlockLwopsEnv()
+		diary.Infof("将进入WEB容器内操作，默认登录itops用户，可在容器内使用`su root`切换至root用户！\n\n\n")
+		execUser := fmt.Sprintf("%d:%d", action.GetUseRunContainerUserUid(), action.GetUseRunContainerUserUid())
+		exitCode := util.RunCommandWithCli(action.GetRuncBin(), "--root", action.GetRuncStatePath(), "exec", "--tty", "--user", execUser, webContainer.Name, "bash")
+		diary.Infof("已退出WEB容器，exitCode：%d \n\n\n", exitCode)
 	}
 
 	return true
 }
 
 // 显示web容器状态
-func ShowWebStatus() {
-	webContainer := action.GetCurrentExistWebContainer()
+func ShowWebStatus() bool {
+	envParams := common.GetDeployEnvParams()
+	webContainer := action.GetCurrentRunningWebContainer()
 	if webContainer != nil {
-		envParams := GetDeployEnvParams()
-		fmt.Printf("WEB容器名称：%v \n", webContainer.Names)
-		fmt.Printf("容器ID：%v \n", webContainer.ID)
-		fmt.Printf("部署路径：%v \n", common.GetLwopsVolume())
-		if strings.Contains(webContainer.Status, "Up") {
-			fmt.Printf("使用端口：%v \n", webContainer.Ports)
-			defer fmt.Println("WEB容器正在运行中！")
-			if macAddr := getContainerMacAddress(webContainer); macAddr != "" {
-				fmt.Printf("物理地址（MAC地址）：%v \n", macAddr)
-			}
-		} else {
-			defer fmt.Println("未启动WEB容器！（使用 `lwctl web -s start` 启动容器）")
-		}
-
-		fmt.Printf("使用镜像：%v \n", webContainer.Image)
-		fmt.Printf("生成配置：%v \n", envParams.Build)
-		fmt.Printf("创建时间：%v \n", time.Unix(webContainer.Created, 0).Format("2006-01-02 15:04:05"))
-		fmt.Printf("容器状态：%v \n", webContainer.Status)
+		diary.Infof("WEB容器运行名称：%v", webContainer.Name)
+		diary.Infof("runc进程pid：%v", webContainer.Pid)
+		diary.Infof("部署路径：%v", common.GetLwopsVolume())
+		diary.Infof("启动命令：%v", util.GetProcessCmdlineParams(webContainer.Pid))
+		diary.Infof("环境配置：%+v", envParams.Build)
+		return true
 	} else {
-		defer fmt.Println("部署目录未创建WEB容器！（请使用 `lwctl build` 命令创建容器）")
+		if common.IsExistDeployEnvSetting() {
+			diary.Infof("环境配置：%+v ", envParams.Build)
+		} else {
+			diary.Infof("未生成运行环境配置，使用 lwctl build 命令创建运行环境配置！")
+		}
+		diary.Infof("当前部署目录未启动WEB容器！（使用 `lwctl web -s start` 启动容器）")
+		return false
 	}
-}
-
-func getContainerMacAddress(webContainer *types.Container) string {
-	endpointSetting := webContainer.NetworkSettings.Networks["bridge"]
-	if endpointSetting != nil {
-		return endpointSetting.MacAddress
-	}
-	return ""
 }
 
 // 回滚操作
 func RollbackCommandHandle(params *structure.RollbackParams) bool {
 	if !util.InArray(params.Type, []string{"image"}) {
-		fmt.Printf("未知的操作：%v\n", params.Type)
+		diary.Infof("未知的操作：%v", params.Type)
 		return false
 	}
 
-	switch params.Type {
-	case "image":
-		action.RollbackLastImage()
-	}
+	// switch params.Type {
+	// case "image":
+	// 	RollbackLastImage()
+	// }
 
 	return true
 }
@@ -217,20 +211,20 @@ func AppCommandHandle(params *structure.AppParams) bool {
 	branchList := gogit.GetRepositoryBranchList(common.GetLwappPath())
 
 	if params.ShowVersionList && params.ToVersion == "" {
-		fmt.Printf("当前应用版本：%v \n", currentBranchName)
-		fmt.Println("已安装版本：")
+		diary.Infof("当前应用版本：%v", currentBranchName)
+		diary.Infof("已安装版本：")
 		for _, branchItem := range branchList {
 			if branchItem == "master" {
 				continue
 			}
 			appVersionInfo := common.GetAppVersionNumberInfo(branchItem)
-			fmt.Printf("部署方式：%-8s版本号：%v \n", appVersionInfo.Mode, appVersionInfo.VersionNumber)
+			diary.Infof("部署方式：%-8s版本号：%v", appVersionInfo.Mode, appVersionInfo.VersionNumber)
 		}
 		return true
 	}
 
 	if params.ToVersion == "" {
-		fmt.Println("请输入要切换的版本！")
+		diary.Warningf("请输入要切换的版本！")
 		return false
 	}
 
@@ -244,33 +238,31 @@ func AppCommandHandle(params *structure.AppParams) bool {
 	}
 
 	if !gogit.CheckBranchIsExist(common.GetLwappPath(), params.ToVersion) {
-		fmt.Println("当前部署目录不存在版本号：", params.ToVersion)
+		diary.Errorf("当前部署目录不存在版本号：", params.ToVersion)
 		return false
 	}
 
 	isRunningContainer := action.GetCurrentRunningWebContainer() != nil
 	if isRunningContainer {
-		fmt.Println("当前WEB容器正在运行中！切换版本操作会先停止WEB容器运行，将在版本切换完成后重启")
+		diary.Infof("当前WEB容器正在运行中！切换版本操作会先停止WEB容器运行，将在版本切换完成后重启")
 		action.StopContainer() // 切换版本会先停止容器
 	}
 
 	autoCommit := action.CheckAndCommitLwappChange() // 检查未忽略未提交的文件自动提交
 	if autoCommit > 0 {
-		fmt.Printf("切换版本前自动提交%v个未忽略未提交的文件\n", autoCommit)
+		diary.Infof("切换版本前自动提交%v个未忽略未提交的文件", autoCommit)
 	}
 	ok := action.CheckoutAppVersion(params.ToVersion)
 	if ok {
-		fmt.Printf("切换至（%v）成功，更新前版本:（%v）\n", strings.Replace(params.ToVersion, "_", " ", 1), strings.Replace(currentBranchName, "_", " ", 1))
+		diary.Infof("切换至（%v）成功，更新前版本:（%v）", strings.Replace(params.ToVersion, "_", " ", 1), strings.Replace(currentBranchName, "_", " ", 1))
 		action.CheckAndCreatePersistenceDir()
-		common.ChownDirectoryPower(common.GetLwappPath())
 	} else {
-		fmt.Println(diary.Ob_get_contents())
-		fmt.Printf("切换至（%v）失败！当前版本:（%v）\n", strings.Replace(params.ToVersion, "_", " ", 1), strings.Replace(currentBranchName, "_", " ", 1))
+		diary.Errorf("切换至（%v）失败！当前版本:（%v）", strings.Replace(params.ToVersion, "_", " ", 1), strings.Replace(currentBranchName, "_", " ", 1))
 	}
 
 	if isRunningContainer {
 		if action.RunContainer() {
-			fmt.Println("容器重新启动成功")
+			diary.Infof("容器重新启动成功")
 		}
 		action.RunAppInitializationCommand()
 	}
@@ -285,48 +277,54 @@ func EtcCommandHandle(params *structure.EtcParams) bool {
 	branchList := gogit.GetRepositoryBranchList(etcPath)
 
 	if params.ShowVersionList && params.ToVersion == "" {
-		fmt.Printf("当前应用配置分支：%v \n", currentBranchName)
-		fmt.Println("已存在配置版本：")
+		diary.Infof("当前应用配置分支：%v", currentBranchName)
+		diary.Infof("已存在配置版本：")
 		for _, branchItem := range branchList {
 			if branchItem == "master" || strings.HasSuffix(branchItem, action.EtcBranchRuntimeSuffix) {
 				continue
 			}
-			fmt.Printf("%v \n", branchItem)
+			diary.Infof("%v", branchItem)
 		}
 		return true
 	}
 
 	if params.ToVersion == "" {
-		fmt.Println("请输入要切换的配置版本！")
+		diary.Warningf("请输入要切换的配置版本！")
 		return false
 	}
 	if !gogit.CheckBranchIsExist(etcPath, params.ToVersion) {
-		fmt.Printf("切换失败，配置版本（%v）不存在！\n", params.ToVersion)
+		diary.Errorf("切换失败，配置版本（%v）不存在！", params.ToVersion)
 		return false
 	}
 
 	if changeNum := action.CheckAndCommitEtcChange(); changeNum > 0 {
-		fmt.Printf("切换前自动提交配置包变动%v个文件！\n", changeNum)
+		diary.Warningf("切换前自动提交配置包变动%v个文件！", changeNum)
 	}
-	existWebContainer := action.GetCurrentExistWebContainer() != nil          // 更新前存在创建的WEB容器
+
 	existRunningWebContainer := action.GetCurrentRunningWebContainer() != nil // 更新前存在运行中的WEB容器
 	if existRunningWebContainer {
-		fmt.Println("当前WEB容器运行中，切换配置版本会重新生成WEB容器并重启！")
+		diary.Infof("当前WEB容器运行中，切换配置版本将会停止WEB容器运行！")
+		action.StopContainer()
 	}
 
 	if gogit.CheckoutRepositoryBranch(etcPath, params.ToVersion, []string{}) {
-		fmt.Printf("切换至配置包版本（%v）成功，切换前版本（%v）\n", params.ToVersion, currentBranchName)
+		diary.Infof("切换至配置包版本（%v）成功，切换前版本（%v）", params.ToVersion, currentBranchName)
 	} else {
-		fmt.Printf("切换至配置包版本（%v）失败，当前版本（%v）\n", params.ToVersion, currentBranchName)
+		diary.Errorf("切换至配置包版本（%v）失败，当前版本（%v）", params.ToVersion, currentBranchName)
 		return false
 	}
 
 	common.ChownDirectoryPower(common.GetEtcPath())
+
+	if params.WithBuild {
+		diary.Infof("切换配置包版本成功，尝试重新生成运行配置并启动容器")
+	} else {
+		return true
+	}
+
+
 	// 存在生成容器环境配置 并且 存在创建的WEB容器
-	if util.FileExists(getDeployEnvFilePath()) && existWebContainer {
-		if existRunningWebContainer {
-			action.StopContainer()
-		}
+	if util.FileExists(common.GetDeployEnvFilePath()) {
 		if BuildContainerByEnvParams() { // 根据当前环境配置重新生成容器
 			if existRunningWebContainer {
 				if action.RunContainer() { // 启动容器
@@ -343,12 +341,14 @@ func EtcCommandHandle(params *structure.EtcParams) bool {
 func ExecCommandHandle(params *structure.ExecParams) bool {
 	webContainer := action.GetCurrentRunningWebContainer()
 	if webContainer == nil {
-		fmt.Println("WEB容器未启动！")
+		diary.Errorf("WEB容器未启动！")
 		return false
 	}
-
+	isBackstage := (util.InArray("-d", os.Args) || util.InArray("--d", os.Args))
 	diary.IsRealTimeOutput = true
-	ok := action.RunContainerCommand(params.Command, 0)
-	fmt.Println("发送结果：", ok)
+	ok := action.RunContainerCommand(params.Command, !isBackstage, 0)
+	if isBackstage {
+		diary.Infof("发送结果：", ok)
+	}
 	return ok
 }

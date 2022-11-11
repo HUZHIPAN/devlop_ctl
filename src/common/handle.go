@@ -1,9 +1,8 @@
 package common
 
 import (
-	"context"
+	"fmt"
 	"lwapp/pkg/diary"
-	"lwapp/pkg/docker"
 	"lwapp/pkg/gogit"
 	"lwapp/pkg/util"
 	"os"
@@ -18,15 +17,19 @@ var UseDefaultUserUid int
 
 func ExecuteBeforeCheckHandle() bool {
 	go checkCtlWorkAble()
-	go checkDockerStatus()
 	go checkEtcPathStatus()
 	go checkLwAppPathStatus()
 
-	if os.Getuid() == 0 && !checkDefaultUser() {
+	if os.Getuid() != 0 {
+		fmt.Print("部署工具只支持使用root用户运行！\n")
 		return false
+	} else {
+		if !checkDefaultUser() {
+			return false
+		}
 	}
 
-	taskNum := 4
+	taskNum := 3
 	for {
 		ok := <-checkChan
 		if !ok {
@@ -66,18 +69,6 @@ func checkCtlWorkAble() {
 	checkChan <- true
 }
 
-func checkDockerStatus() {
-	dock := docker.NewDockerClient()
-	_, err := dock.Ping(context.TODO())
-	if err != nil {
-		diary.Errorf("无法获取docker环境状态：%v", err)
-		checkChan <- false
-		return
-	}
-	// diary.Infof("docker状态正常: %v", s)
-
-	checkChan <- true
-}
 
 func checkLwAppPathStatus() {
 	lwappPath := GetLwappPath()
@@ -195,7 +186,7 @@ func checkEtcPathStatus() {
 func checkDefaultUser() bool {
 	u, err := user.Lookup(DefaultUser)
 	if err != nil {
-		useradd := exec.Command("useradd", DefaultUser)
+		useradd := exec.Command("adduser", "-D", DefaultUser)
 		err := useradd.Start()
 		if err != nil {
 			diary.Errorf("执行创建%v用户命令失败：%v", DefaultUser, err)

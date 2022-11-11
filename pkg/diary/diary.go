@@ -104,9 +104,7 @@ func copyFile(srcFile, destFile string) (int64, error) {
 }
 
 func Ob_Start() {
-	if ob_start {
-		ob_buffer = ""
-	}
+	Ob_Clean()
 	ob_start = true
 }
 
@@ -123,6 +121,7 @@ func GetGlobalLogContent() (string, error) {
 }
 
 func Ob_End() {
+	Ob_Clean()
 	ob_start = false
 }
 func Ob_Clean() {
@@ -130,13 +129,14 @@ func Ob_Clean() {
 }
 
 func Ob_Printf(format string, v ...interface{}) {
+	s := fmt.Sprintf(format, v...) + "\n"
+	
 	if ob_start {
-		s := fmt.Sprintf(format, v...) + "\n"
 		ob_buffer += s
 	}
 
 	if IsRealTimeOutput {
-		fmt.Printf(format+"\n", v...)
+		fmt.Print(s)
 	}
 }
 

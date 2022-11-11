@@ -57,16 +57,9 @@ func ProductUpdateApply(sourcePath string, event *EventPackage) *ProductApplyRes
 		diary.Warningf("仓库（%v）已经存在版本分支（%v）！", lwAppPath, appVersion)
 	}
 
-	isExistRunContainer := GetCurrentRunningWebContainer() != nil
-	if isExistRunContainer {
-		// 开始全量更新前，先停止容器
-		diary.Infof("当前部署目录（%v）存在运行中的容器", common.GetLwopsVolume())
-		StopContainer()
-	}
-
 	if !gogit.CheckoutRepositoryBranch(lwAppPath, appVersion, common.GetLwappIgnoreExpression()) {
 		diary.Errorf("仓库（%v）切换至新版本分支（%v）失败！", lwAppPath, appVersion)
-		RollbackProductOnFail(currentBranchName, isExistRunContainer)
+		RollbackProductOnFail(currentBranchName, false)
 		return result
 	} else {
 		diary.Infof("仓库（%v）切换至新版本分支（%v）", lwAppPath, appVersion)
@@ -76,7 +69,7 @@ func ProductUpdateApply(sourcePath string, event *EventPackage) *ProductApplyRes
 	err := packer.NewTgzPacker().UnPack(sourcePath+"/"+event.FileRelativePath, lwAppPath, ignorePrefix, []string{".gitignore"})
 	if err != nil {
 		diary.Errorf("更新全量产品包操作，解压至（%v）目录时发生异常: %v", lwAppPath, err)
-		RollbackProductOnFail(currentBranchName, isExistRunContainer)
+		RollbackProductOnFail(currentBranchName, false)
 		return result
 	} else {
 		diary.Infof("更新全量产品包解压至目录（%v）成功", lwAppPath)
@@ -85,13 +78,13 @@ func ProductUpdateApply(sourcePath string, event *EventPackage) *ProductApplyRes
 	statusList, err := gogit.RepositoryWorkSpaceStatus(lwAppPath, common.GetLwappIgnoreExpression())
 	if err != nil {
 		diary.Errorf("仓库（%v）获取工作区变动发生异常: %v", lwAppPath, err)
-		RollbackProductOnFail(currentBranchName, isExistRunContainer)
+		RollbackProductOnFail(currentBranchName, false)
 		return result
 	}
 	commitComment := fmt.Sprintf("产品包更新：更新前版本（%v），更新版本（%v），更新描述：%v", currentBranchName, event.Name, event.Description)
 	if !gogit.CommitDirChange(lwAppPath, commitComment, common.GetLwappIgnoreExpression()) {
 		diary.Errorf("仓库（%v）提交新版本代码失败！%v个文件变动！", lwAppPath, len(statusList))
-		RollbackProductOnFail(currentBranchName, isExistRunContainer)
+		RollbackProductOnFail(currentBranchName, false)
 		return result
 	} else {
 		diary.Infof("仓库（%v）提交变动成功:%v 个文件变动", lwAppPath, len(statusList))
@@ -102,17 +95,6 @@ func ProductUpdateApply(sourcePath string, event *EventPackage) *ProductApplyRes
 	result.LwAppPath = lwAppPath
 
 	diary.Infof("更新产品更新包成功")
-
-	// 检查产品目录的软链及目录权限
-	CheckAndCreatePersistenceDir()
-	common.ChownDirectoryPower(common.GetLwappPath())
-
-	if isExistRunContainer {
-		// 全量更新完成，尝试启动容器
-		RunContainer()
-		RunAppInitializationCommand()
-	}
-
 	return result
 }
 
@@ -222,6 +204,8 @@ func CheckAndCreatePersistenceDir() bool {
 	}
 
 	os.MkdirAll(lwappPath+"/web/assets", os.ModePerm)
+	util.RunCommandWithCli("chown", "-R", fmt.Sprintf("%d:%d", common.UseDefaultUserUid, common.UseDefaultUserUid), common.GetLwappPath()) // 授权lwjk_app目录所有者和组为itops用户
+	util.RunCommandWithCli("chown", "-R", fmt.Sprintf("%d:%d", common.UseDefaultUserUid, common.UseDefaultUserUid), common.GetPersistenceVolume())
 	return true
 }
 
@@ -278,8 +262,7 @@ func ApplyWithExistDirectory(existLwappPath string, versionBranch string) bool {
 	} else {
 		diary.Errorf("复制目录（%v）到（%v）成功", existLwappPath, lwAppPath)
 	}
-	CheckAndCreatePersistenceDir()
-	common.ChownDirectoryPower(common.GetLwappPath())
+
 	statusList, err := gogit.RepositoryWorkSpaceStatus(lwAppPath, common.GetLwappIgnoreExpression())
 	if err != nil {
 		diary.Errorf("仓库（%v）获取工作区变动发生异常: %v", lwAppPath, err)
@@ -308,9 +291,9 @@ func ApplyWithExistDirectory(existLwappPath string, versionBranch string) bool {
 func RunAppInitializationCommand() bool {
 	webContainer := GetCurrentRunningWebContainer()
 	if webContainer != nil {
-		ok := RunContainerShellScript("/itops/etc/web/init.sh") // 执行web初始化脚本
+		ok := RunContainerScript("/itops/etc/web/init.sh", 1)
 		audit := fmt.Sprintf("发送初始化请求到容器：%v", ok)
-		fmt.Println(audit)
+		diary.Infof(audit)
 		return ok
 	}
 	return false

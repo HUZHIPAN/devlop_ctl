@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	version string = "v1.0" // 工具版本
+	version string = "v1.2" // 工具版本
 )
 
 func main() {
@@ -30,7 +30,6 @@ func main() {
 	webCmd := flag.NewFlagSet("web", flag.ExitOnError)
 	webCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
 	webCmd.StringVar(&webParams.Action, "s", "", "操作：（启动start| 停止stop| 重启restart| 查看status| 进入容器enter）")
-	webCmd.BoolVar(&webParams.WithRemove, "rm", false, "删除容器，仅支持stop时指定，如：lwctl web -s stop -rm")
 
 	buildParams := &structure.BuildParams{}
 	buildCmd := flag.NewFlagSet("build", flag.ExitOnError)
@@ -47,19 +46,21 @@ func main() {
 	appParams := &structure.AppParams{}
 	appCmd := flag.NewFlagSet("app", flag.ExitOnError)
 	appCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
-	appCmd.BoolVar(&appParams.ShowVersionList, "l", true, "查看部署的版本列表  示例：lwctl app -l")
+	appCmd.BoolVar(&appParams.ShowVersionList, "l", false, "查看部署的版本列表  示例：lwctl app -l")
 	appCmd.StringVar(&appParams.ToVersion, "c", "", "切换版本号（v6.0.1） 示例：lwctl app -v v6.0.1")
 
 	etcParams := &structure.EtcParams{}
 	etcCmd := flag.NewFlagSet("etc", flag.ExitOnError)
 	etcCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
-	etcCmd.BoolVar(&etcParams.ShowVersionList, "l", true, "查看配置包的版本列表  示例：lwctl etc -l")
+	etcCmd.BoolVar(&etcParams.ShowVersionList, "l", false, "查看配置包的版本列表  示例：lwctl etc -l")
 	etcCmd.StringVar(&etcParams.ToVersion, "c", "", "切换配置包版本号（v0.11） 示例：lwctl etc -c v0.11")
+	etcCmd.BoolVar(&etcParams.WithBuild, "with-build", true, "切换配置包后是否生成运行配置")
 
 	execParams := &structure.ExecParams{}
 	execCmd := flag.NewFlagSet("exec", flag.ExitOnError)
 	execCmd.StringVar(&globalParams.LwopsPath, "p", common.DefaultLwopsPath, "部署目录")
 	execCmd.StringVar(&execParams.Command, "c", "", "容器内执行的bash命令，默认工作目录（/itops/nginx/html/lwjk_app）")
+	execCmd.BoolVar(&execParams.IsBackstage, "d", false,"仅发送指令（后台执行）")
 
 	servicedParams := &structure.ServicedParams{}
 	servicedCmd := flag.NewFlagSet("serviced", flag.ExitOnError)
@@ -90,8 +91,8 @@ func main() {
 			if !enterBefore(globalParams) {
 				return
 			}
-			if parse.IsDefaultBuildParams(buildParams) && parse.IsExistDeployEnvSetting() {
-				fmt.Println("未指定生成容器配置，默认使用上一次生成容器使用的配置！")
+			if common.IsDefaultBuildParams(buildParams) && common.IsExistDeployEnvSetting() {
+				fmt.Println("未指定生成运行环境配置，默认使用上一次生成使用的配置！")
 				parse.BuildContainerByEnvParams()
 				return
 			}
@@ -132,8 +133,9 @@ func main() {
 		if !enterBefore(globalParams) {
 			return
 		}
+		
+		etcParams.ShowVersionList = util.InArray("-l", os.Args) || util.InArray("--l", os.Args)
 		parse.EtcCommandHandle(etcParams)
-
 	case "app":
 		if len(os.Args) > 2 {
 			appCmd.Parse(os.Args[2:])
@@ -143,6 +145,7 @@ func main() {
 		if !enterBefore(globalParams) {
 			return
 		}
+		appParams.ShowVersionList = util.InArray("-l", os.Args) || util.InArray("--l", os.Args)
 		parse.AppCommandHandle(appParams)
 	case "exec":
 		if len(os.Args) > 2 {
@@ -173,19 +176,15 @@ func enterBefore(globalParams *structure.GlobalParams) bool {
 		fmt.Println("部署路径异常！")
 		return false
 	}
-	diary.Ob_Start()
+	diary.Infof("开始执行%v操作：%v \n", os.Args[1], os.Args)
 
-	if os.Args[1] == "apply" {
-		diary.IsRealTimeOutput = true // 实时输出审计
-	}
-
+	diary.IsRealTimeOutput = true // 开启实时输出审计
 	ok = common.ExecuteBeforeCheckHandle() // 执行前检查
 	if !ok {
-		fmt.Println(diary.Ob_get_contents())
 		fmt.Println("环境监测异常！")
 		return false
 	}
-	diary.Infof("执行%v操作：%v", os.Args[1], os.Args)
+
 	return true
 }
 
@@ -196,16 +195,16 @@ func printHelp() {
                     | |__\ V  V /| |_| |  __/ ___) |
                     |_____\_/\_/  \___/|_|   |____/ 
 
-lwctl工具针对乐维web的部署环境初始化及持续可靠的版本更新支持，需要当前系统装好docker环境
+lwctl工具针对乐维web的部署环境初始化及持续可靠的版本更新支持，以及web服务的管理
 使用场景：
      1、生产环境快速构建（部署）
           拿到产品部署包，使用lwctl工具快速构建环境（仅支持tar.gz格式包）
                示例 ：lwctl apply -f lwjk_deploy_6.1.tar.gz 
 
      2、启动WEB服务
-          2.1 生成运行容器，用于指定对外端口，指定容器内的物理地址（MAC地址，授权机器）
-               示例：lwctl build --mac-addr=00-15-5D-A0-76-41 （支持WEB端口指定，使用默认端口可省略）
-          2.2 管理服务（查看状态：status、启动：start、停止：stop、重启：restart）
+          2.1 生成运行环境配置，用于指定启动端口，后端服务地址等
+               示例：lwctl build --web-api-gateway=http://172.19.1.70:8081 （支持WEB端口指定，使用默认端口可省略）
+          2.2 管理服务（查看状态 status、启动 start、停止 stop、重启 restart、进入容器 enter）
                示例：lwctl web -s start
 
      3、WEB系统更新（支持镜像、环境配置、产品版本等更新）
@@ -229,7 +228,7 @@ lwctl工具针对乐维web的部署环境初始化及持续可靠的版本更新
 	f := "%-10s %-30s %-40s\n"
 	fmt.Println("\n", "commands：")
 	fmt.Printf(f, "apply", "应用包更新（部署或更新）", "示例：lwctl apply -f package.tar.gz")
-	fmt.Printf(f, "build", "创建运行容器，配置端口、绑定mac地址等", "示例：lwctl build --help")
+	fmt.Printf(f, "build", "生成运行配置，配置前后端服务端口，api地址等", "示例：lwctl build --help")
 	fmt.Printf(f, "app", "管理产品版本", "示例：lwctl app -c v6.0.1")
 	fmt.Printf(f, "web", "管理WEB服务的启动停止", "示例：lwctl web --help")
 	fmt.Printf(f, "etc", "管理配置包版本", "示例：lwctl etc --help")

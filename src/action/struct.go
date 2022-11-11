@@ -31,3 +31,8 @@ func GetAppVersionByBranchName(branchName string) string {
 	appVersion = strings.TrimPrefix(appVersion, common.IncrPackagePrefix)
 	return appVersion
 }
+
+type Container struct {
+	Pid int
+	Name string
+}

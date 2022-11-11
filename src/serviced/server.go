@@ -107,11 +107,13 @@ func InitRouter() *gin.Engine {
 	r.Use(gin.Logger())
 	// r.Use(gin.LoggerWithConfig(gin.LoggerConfig{Output: &logfile.LogFile{File_Path: "log.txt"}}))
 
+	r.Use(Core())
 	r.Use(gin.Recovery())
 
 	apiv1 := r.Group("/lwctl/v1")
 	{
 		apiv1.POST("/upload-package", UploadPackage)
+		apiv1.POST("/apply-package", ApplyWithUploadedPackage)
 		apiv1.POST("/proxy-call", ProxyCall)
 		apiv1.POST("/version-history", GetAppVersionList)
 		apiv1.POST("/commit-diff", GetCommitChangeList)
@@ -120,6 +122,27 @@ func InitRouter() *gin.Engine {
 
 	return r
 }
+
+
+
+//解决跨域问题
+func Core() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Headers", "Content-Type,AccessToken,X-CSRF-Token,Authorization,Token")
+		c.Header("Access-Control-Allow-Methods", "POST,GET,OPTIONS")
+		c.Header("Access-Control-Expose-Headers", "Content-Length,Access-Control-Allow-Origin,Access-Control-Allow-Headers,Content-Type")
+		c.Header("Access-Control-Allow-Credentials", "True")
+		//放行索引options
+		if method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+		}
+		//处理请求
+		c.Next()
+	}
+}
+
 
 func filterKeyword(args []string, keyword string) []string {
 	filterArgs := []string{}

@@ -28,7 +28,7 @@ func ParseRequestPackage(packageFile string) *ApplyHandle {
 		return nil
 	}
 
-	unpackPath := getPackageFileUnpackPath(packageFile)
+	unpackPath := GetPackageFileUnpackPath(packageFile)
 	os.MkdirAll(unpackPath, os.ModePerm)
 	err := packer.NewTgzPacker().UnPack(packageFilePath, unpackPath, []string{}, []string{})
 
@@ -63,7 +63,7 @@ func ParseRequestPackage(packageFile string) *ApplyHandle {
 	return handle
 }
 
-func getPackageFileUnpackPath(packageFile string) string {
+func GetPackageFileUnpackPath(packageFile string) string {
 	return GetUnPackagePath() + "/" + strings.TrimSuffix(filepath.Base(packageFile), ".tar.gz")
 }
 

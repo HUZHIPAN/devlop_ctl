@@ -1,29 +1,15 @@
 package action
 
 import (
-	"context"
 	"fmt"
-	"io/fs"
 	"lwapp/pkg/diary"
-	"lwapp/pkg/docker"
 	"lwapp/pkg/gogit"
 	"lwapp/pkg/util"
 	"lwapp/src/common"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"lwapp/src/structure"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/go-connections/nat"
 )
 
 type ImageApplyResult struct {
@@ -43,22 +29,26 @@ func ImageUpdateApply(sourcePath string, event *EventPackage) *ImageApplyResult 
 		return result
 	}
 
-	rootfsPackageFile := sourcePath+"/"+event.FileRelativePath
+	rootfsPackageFile := sourcePath + "/" + event.FileRelativePath
 	rootfsPath := common.GetRootfsPath()
 
 	imgTag := event.Name // 更新包镜像tag
-
 	refreshAfterNumber := currentVersionNumber + 1
 
 	if util.FileExists(fmt.Sprintf("%v/%d/%v", rootfsPath, currentVersionNumber, imgTag)) {
 		diary.Infof("加载镜像（%v），与当前最新镜像版本一致，已略过更新", imgTag)
 		result.ExistDiff = false
 	} else {
-		exitCode := util.RunCommandAndWait("tar", "-xvf", rootfsPackageFile, "-C", fmt.Sprintf("%v/%d", rootfsPath, refreshAfterNumber))
+		refreshPath := fmt.Sprintf("%v/%d", rootfsPath, refreshAfterNumber)
+		os.MkdirAll(refreshPath, os.ModePerm)
+		exitCode := util.RunCommandAndWait("tar", "-xvf", rootfsPackageFile, "-C", refreshPath)
 		if exitCode == 0 {
+			util.WriteFileWithDir(fmt.Sprintf("%v/%d/%v", rootfsPath, refreshAfterNumber, imgTag), imgTag)
+			diary.Infof("更新镜像roofs成功，更新最新版本（%v），更新ID（%v）", imgTag, refreshAfterNumber)
 			result.ExistDiff = true
 		} else {
 			diary.Errorf("更新镜像失败，执行tar命令解压发生错误，exitCode：%v", exitCode)
+			os.RemoveAll(refreshPath)
 			return result
 		}
 	}
@@ -68,40 +58,23 @@ func ImageUpdateApply(sourcePath string, event *EventPackage) *ImageApplyResult 
 	return result
 }
 
-func RollbackLastImage() bool {
-	lastImageNumber := GetLastWebImageTagNumber()
-	dock := docker.NewDockerClient()
-	LastImageTag := fmt.Sprintf("%v:%v", "", lastImageNumber)
-	err := dock.RemoveImage(LastImageTag)
-	if err != nil {
-		diary.Errorf("回滚最后一次加载的镜像失败：%v", err)
-		return false
-	} else {
-		diary.Infof("回滚镜像成功：%v", LastImageTag)
-	}
-	return true
-}
-
+// 获取镜像（rootfs）最新版本号
 func GetLastWebImageTagNumber() int {
 	var currentMaxVersionNumber int64 = 0
 	rootfsPath := common.GetRootfsPath()
-	err := filepath.WalkDir(rootfsPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	fileList := util.GetDirFileList(rootfsPath)
+
+	for _, dirInfo := range fileList {
+		if !dirInfo.IsDir() {
+			continue
 		}
-		number, err := strconv.ParseInt(filepath.Base(path), 0, 64)
+		number, err := strconv.ParseInt(dirInfo.Name(), 0, 64)
 		if err != nil {
-			return nil
+			continue
 		}
 		if number > currentMaxVersionNumber {
 			currentMaxVersionNumber = number
 		}
-		return nil
-	})
-
-	if err != nil {
-		diary.Errorf("获取镜像目录版本失败：%v", err)
-		return -1
 	}
 
 	if currentMaxVersionNumber == 0 {
@@ -112,159 +85,37 @@ func GetLastWebImageTagNumber() int {
 }
 
 // 执行web容器内的命令，工作目录（/itops/nginx/html/lwjk_app）
-func RunContainerCommand(runCmd string, delay int) bool {
-	d := docker.NewDockerClient()
-	webContainer := GetCurrentRunningWebContainer()
-	if webContainer == nil {
-		fmt.Printf("发送容器exec命令（%v）错误：没有运行中的WEB容器! \n", runCmd)
-		return false
-	}
-
-	// runcPath := common.GetEtcRuncPath()
-	// util.RunCommandWithDaemon(runcPath+"/runc", "--root", runcStatePath, "run")
-
-	execLogFileSuffix := time.Now().Format("2006-01-02") + ".txt"
-	execLogFile := "/itops/logs/exec/" + execLogFileSuffix
-	execLogMessage := fmt.Sprintf("\n%v 执行命令：>>>>>>>>>>>>>>>>>>>>>> %v", time.Now().Format("2006-01-02 15:04:05"), runCmd)
-
-	commandConfig := types.ExecConfig{
-		User:         fmt.Sprintf("%d", GetUseRunContainerUserUid()),
-		AttachStdin:  false,
-		AttachStderr: false,
-		AttachStdout: false,
-		WorkingDir:   "/itops/nginx/html/lwjk_app",
-		Cmd:          []string{"/bin/sh", "-c", fmt.Sprintf("sleep %d; echo '%v' >> %v; bash -c '%v' &>> %v", delay, execLogMessage, execLogFile, runCmd, execLogFile)},
-	}
-	idResponse, err := d.ContainerExecCreate(context.TODO(), webContainer.ID, commandConfig)
-	if err != nil {
-		fmt.Printf("创建容器exec命令（%v）错误：%v \n", runCmd, err)
-		return false
-	}
-
-	startCheck := types.ExecStartCheck{}
-	err = d.ContainerExecStart(context.TODO(), idResponse.ID, startCheck)
-	// response, err := d.ContainerExecAttach(context.TODO(), idResponse.ID, startCheck)
-	if err != nil {
-		fmt.Printf("发送exec命令（%v）失败：%v", runCmd, err)
-		return false
-	}
-
-	diary.Infof("发送exec命令（%v）成功，可在（%v）中查看执行结果", runCmd, common.GetWebExecLogPath()+"/"+execLogFileSuffix)
-	return true
-}
-
-// 执行web容器内的脚本文件，工作目录（/itops/nginx/html/lwjk_app）
-func RunContainerShellScript(shFile string) bool {
-	d := docker.NewDockerClient()
+func RunContainerCommand(runCmd string, interactive bool, delay int) bool {
 	webContainer := GetCurrentRunningWebContainer()
 	if webContainer == nil {
 		return false
 	}
 
-	execLogFile := "/itops/logs/exec/" + time.Now().Format("2006-01-02") + "_bash" + ".txt"
-	execLogMessage := fmt.Sprintf("\n%v 执行脚本（%v）：>>>>>>>>>>>>>>>>>>>>>>>>>>>>", time.Now().Format("2006-01-02 15:04:05"), shFile)
+	logFileName := time.Now().Format("2006-01-02") + "_command_log" + ".txt"
+	execLogFile := "/itops/logs/exec/" + logFileName
+	execLogMessage := fmt.Sprintf("\n%v 执行命令（%v）：>>>>>>>>>>>>>>>>>>>>>>>>>>>>", time.Now().Format("2006-01-02 15:04:05"), runCmd)
+	runCommandUser := fmt.Sprintf("%d", common.GetDeployEnvParams().Uid)
+	lwjkAppPath := "/itops/nginx/html/lwjk_app"
 
-	commandConfig := types.ExecConfig{
-		User:         fmt.Sprintf("%d", GetUseRunContainerUserUid()),
-		AttachStdin:  false,
-		AttachStderr: false,
-		AttachStdout: false,
-		WorkingDir:   "/itops/nginx/html/lwjk_app",
-		Cmd:          []string{"/bin/sh", "-c", fmt.Sprintf("echo '%v' >> %v; sh %v &>> %v", execLogMessage, execLogFile, shFile, execLogFile)},
-	}
-	idResponse, err := d.ContainerExecCreate(context.TODO(), webContainer.ID, commandConfig)
-	if err != nil {
-		fmt.Printf("创建容器exec脚本（%v）发生错误：%v \n", commandConfig.Cmd, err)
-		return false
-	}
-
-	startCheck := types.ExecStartCheck{}
-	err = d.ContainerExecStart(context.TODO(), idResponse.ID, startCheck)
-	// response, err := d.ContainerExecAttach(context.TODO(), idResponse.ID, startCheck)
-	if err != nil {
-		fmt.Printf("发送容器exec脚本（%v）失败：%v \n", commandConfig.Cmd, err)
-		return false
-	}
-
-	return true
-}
-
-// 创建web容器
-func CreateContainer(params *structure.BuildParams) *types.Container {
-	lastImageTagNumber := GetLastWebImageTagNumber()
-	if lastImageTagNumber <= 0 {
-		diary.Errorf("创建容器失败：未找到镜像")
-		return nil
-	}
-
-	webPortStr := fmt.Sprintf("%d", params.WebPort)
-	webApiPortStr := fmt.Sprintf("%d", params.WebApiPort)
-
-	d := docker.NewDockerClient()
-	c := &container.Config{
-		// User:       util.GetCurrentRunUser(),
-		WorkingDir: "/itops/nginx/html/lwjk_app",
-		MacAddress: "",
-		ExposedPorts: nat.PortSet{
-			nat.Port(webPortStr + "/tcp"):    {},
-			nat.Port(webApiPortStr + "/tcp"): {},
-		},
-		Cmd:   strslice.StrSlice{"sh", "/itops/etc/start.sh"},
-		Image: "" + ":" + fmt.Sprintf("%v", lastImageTagNumber),
-	}
-
-	pvPath := common.GetPersistenceVolume()
-	if strings.Contains(pvPath, "\\") { // 兼容windows路径，此目录映射在windows下不可用，仅兼容
-		pvPath = strings.ReplaceAll(pvPath, "\\", "/")
-		pvPath = strings.ReplaceAll(pvPath, ":", "")
-		if !strings.HasPrefix(pvPath, "/") {
-			pvPath = "/" + pvPath
+	if interactive {
+		util.RunCommandWithCli(GetRuncBin(), "--root", GetRuncStatePath(), "exec", "--user", runCommandUser, "--cwd", lwjkAppPath, "-t", webContainer.Name, "sh", "-c", runCmd)
+		return true
+	} else {
+		execCommand := fmt.Sprintf("sleep %d; echo '%v' >> %v; %v &>> %v", delay, execLogMessage, execLogFile, runCmd, execLogFile)
+		exitCode := util.RunCommandAndWait(GetRuncBin(), "--root", GetRuncStatePath(), "exec", "--user", runCommandUser, "--cwd", lwjkAppPath, "-d", webContainer.Name, "sh", "-c", execCommand)
+		if exitCode != 0 {
+			diary.Errorf("执行容器内命令（%v）发生错误，exitCode：%v", runCmd, exitCode)
+			return false
+		} else {
+			defer diary.Infof("发送exec命令（%v）成功，可在（%v）中查看执行结果", runCmd, common.GetWebExecLogPath()+"/"+logFileName)
+			return true
 		}
 	}
+}
 
-	h := &container.HostConfig{
-		// NetworkMode:   "bridge",
-		RestartPolicy: container.RestartPolicy{},
-		AutoRemove:    false,
-		PortBindings: nat.PortMap{
-			nat.Port(webPortStr + "/tcp"): []nat.PortBinding{
-				{HostPort: webPortStr},
-			},
-			nat.Port(webApiPortStr + "/tcp"): []nat.PortBinding{
-				{HostPort: webApiPortStr},
-			},
-		},
-		Mounts: []mount.Mount{{
-			Type:   mount.TypeBind,
-			Source: common.GetEtcPath(),
-			Target: "/itops/etc",
-		}, {
-			Type:   mount.TypeBind,
-			Source: common.GetLwappPath(),
-			Target: "/itops/nginx/html/lwjk_app",
-		}, {
-			Type:   mount.TypeBind,
-			Source: common.GetPersistenceVolume(),
-			Target: pvPath, // 数据持久化目录
-		}, {
-			Type:   mount.TypeBind,
-			Source: common.GetDeploymentLogPath(),
-			Target: "/itops/logs",
-		}},
-	}
-
-	n := &network.NetworkingConfig{}
-
-	currentPathEnvSuffix := GetCurrentPathEnvContainerSuffix()
-	r, err := d.ContainerCreate(context.TODO(), c, h, n, nil, WebRunContainerName+currentPathEnvSuffix)
-	if err != nil {
-		diary.Errorf("创建容器失败：%v", err)
-		return nil
-	} else {
-		diary.Infof("创建容器id：%v", r.ID)
-	}
-
-	return GetCurrentExistWebContainer()
+// 执行容器内脚本（非交互式）
+func RunContainerScript(commandFile string, delay int) bool {
+	return RunContainerCommand(fmt.Sprintf("sh -c '%v'", commandFile), false, delay)
 }
 
 // 启动web容器
@@ -275,49 +126,95 @@ func RunContainer() bool {
 		return false
 	}
 
-	if !strings.HasSuffix(gogit.GetRepositoryCurrentBranch(common.GetEtcPath()),EtcBranchRuntimeSuffix) {
+	if !strings.Contains(gogit.GetRepositoryCurrentBranch(common.GetEtcPath()), EtcBranchRuntimeSuffix) {
 		diary.Errorf("未生成运行配置，请先使用 lwctl build 命令创建运行环境配置！")
 		return false
 	}
 
-	nginxStartStdoutFile := common.GetDeploymentLogPath() + "/nginx/nginx_stdout.log"
-	os.Remove(nginxStartStdoutFile)
+	runcStateFile := fmt.Sprintf("%v/%v", GetRuncStatePath(), getRuncProcessContainerName())
+	if util.FileExists(runcStateFile) { // 容器停止，但其状态文件未删除，通常是异常退出导致
+		os.RemoveAll(runcStateFile)
+	}
 
-	runcPath := common.GetEtcRuncPath()
-	runcStatePath := common.GetTmpPath() + "/runc"
-	err := util.RunCommandWithDaemon(runcPath+"/runc", "--root", runcStatePath, "run", WebRunContainerName+ GetCurrentPathEnvContainerSuffix())
+	CheckAndCreatePersistenceDir() // 检查软链和持久化目录
+
+	nginxStartStdoutFile := common.GetDeploymentLogPath() + "/nginx/nginx_stdout.log"
+	runcStartStdoutFile := common.GetTmpRuncPath() + "/start.log"
+	os.Remove(nginxStartStdoutFile)
+	os.Remove(runcStartStdoutFile)
+
+	startUpCommand := []string{GetRuncBin(), "--root", GetRuncStatePath(), "run", "--pid-file", getContainerStartupProcessPidFile(), getRuncProcessContainerName(), "--bundle", common.GetEtcRuncPath()}
+	runcCmd, err := util.RunCommandAndRedirectOut(startUpCommand, runcStartStdoutFile)
 	if err != nil {
-		diary.Errorf("启动失败：调用runc失败：%v", err)
+		diary.Infof("启动失败：执行命令（%v）失败：%v", startUpCommand, err)
 		return false
 	}
 
 	beginStart := time.Now().Unix()
 	for {
 		// 轮询检查nginx启动输出
-		// 存在输出文件 或 5s超时 结束
+		// 存在输出文件 或 10s超时 结束
 		if util.FileExists(nginxStartStdoutFile) {
-			time.Sleep(time.Millisecond * 100)
+			time.Sleep(time.Millisecond * 300)
 			break
 		}
 		time.Sleep(time.Millisecond * 100)
-		if time.Now().Unix()-beginStart >= 5 {
+		if time.Now().Unix()-beginStart >= 10 {
 			break
+		}
+	}
+
+	util.RunCommandWithCli("reset", "-c", "xterm")
+
+	diary.Infof("启动命令：\n%v", startUpCommand)
+
+	runcOut, err := os.ReadFile(runcStartStdoutFile)
+	if err != nil {
+		diary.Infof("查看runc进程标准输出和错误输出异常：%v", err)
+	} else {
+		if string(runcOut) != "" {
+			diary.Infof("runc启动进程输出日志：\n%v", string(runcOut))
 		}
 	}
 
 	out, err := os.ReadFile(nginxStartStdoutFile)
 	if err != nil {
-		fmt.Printf("WEB容器启动失败，没有nginx进程输出日志：%v\n", err)
+		diary.Errorf("WEB容器启动失败，没有nginx进程输出日志：%v", err)
 		return false
 	}
 
 	if string(out) != "" {
-		fmt.Printf("WEB容器进程nginx启动失败：%v \n", string(out))
+		diary.Warningf("容器nginx启动输出：\n%v", string(out))
+	}
+
+	if !util.CheckProcessIsRunning(runcCmd.Process.Pid, "runc") {
+		diary.Errorf("WEB容器启动失败：runc进程（%v）已退出！", runcCmd.Process.Pid)
 		return false
 	}
 
-	fmt.Printf("容器启动成功，ID：%v \n", webContainer.ID)
+	if !util.CheckProcessIsRunning(getContainerStartupProcessRunningPid(), "sh") {
+		diary.Errorf("WEB容器启动失败：启动脚本（start.sh）已退出！")
+		return false
+	}
+
+	_, err = util.WriteFileWithDir(getContainerRuncPidFile(), fmt.Sprintf("%d", runcCmd.Process.Pid))
+	if err != nil {
+		diary.Errorf("启动容器写入runc进程pid文件（%v）失败：%v", getContainerRuncPidFile(), err)
+		return false
+	}
+
+	diary.Infof("容器启动成功，runc进程pid：%v ", runcCmd.Process.Pid)
 	return true
+}
+
+// 获取启动容器runc进程的pid文件
+func getContainerRuncPidFile() string {
+	return common.GetTmpRuncPath() + "/runc_container.pid"
+}
+
+// 获取容器启动进程的pid文件
+func getContainerStartupProcessPidFile() string {
+	return common.GetTmpRuncPath() + "/container_startup.pid"
 }
 
 // 获取当前部署目录唯一标识
@@ -329,84 +226,129 @@ func GetCurrentPathEnvContainerSuffix() string {
 	return suffix
 }
 
-// 获取当前存在的web容器
-func GetCurrentExistWebContainer() *types.Container {
-	dock := docker.NewDockerClient()
-	currentPathEnvSuffix := GetCurrentPathEnvContainerSuffix()
+// 获取当前存在并运行的容器
+func GetCurrentRunningWebContainer() *Container {
+	runcProcessIsRunning := checkRuncProcessIsRunning()
+	containerProcessIsRunning := checkContainerProcessIsRunning()
 
-	currentEnvName := WebRunContainerName + currentPathEnvSuffix
-	opt := filters.NewArgs(filters.KeyValuePair{Key: "name", Value: currentEnvName})
-	list, err := dock.ContainerList(context.TODO(), types.ContainerListOptions{Filters: opt, All: true})
-	if err != nil {
-		fmt.Println("获取启动容器列表失败:", err)
+	// diary.Debugf("runc :%v , container: %v ", runcProcessIsRunning, containerProcessIsRunning)
+	if !runcProcessIsRunning && containerProcessIsRunning { // runc进程退出，容器进程未结束
+		exitCode := forceKillContainerProcess()
+		diary.Errorf("runc进程已退出，但容器内尚有进程在运行中，发送强制关闭信号，exitCode：%v", exitCode)
 		return nil
 	}
-	for _, c := range list {
-		for _, nameItem := range c.Names {
-			if strings.TrimPrefix(nameItem, "/") == currentEnvName {
-				return &c
-			}
+
+	if runcProcessIsRunning && containerProcessIsRunning {
+		return &Container{
+			Pid:  getRuncProcessRunningPid(),
+			Name: getRuncProcessContainerName(),
 		}
 	}
-
 	return nil
 }
 
-// 获取当前存在并运行的容器
-func GetCurrentRunningWebContainer() *types.Container {
-	webContainer := GetCurrentExistWebContainer()
-	if webContainer == nil {
-		return nil
+// 检测runc进程是否在运行中
+func checkRuncProcessIsRunning() bool {
+	return util.CheckProcessIsRunning(getRuncProcessRunningPid(), "runc")
+}
+
+// 获取runc进程pid
+func getRuncProcessRunningPid() int {
+	if !util.FileExists(getContainerRuncPidFile()) {
+		return -1
 	}
-	if !strings.Contains(webContainer.Status, "Up") {
-		return nil
+	pidContent, err := os.ReadFile(getContainerRuncPidFile())
+	if err != nil {
+		return -1
 	}
-	return webContainer
+	pidStr := string(pidContent)
+	pidStr = strings.ReplaceAll(pidStr, "\n", "")
+	runcPid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return -1
+	}
+	return runcPid
+}
+
+// 获取容器启动进程（pid为1）在全局命名空间的进程pid
+func getContainerStartupProcessRunningPid() int {
+	pidContent, err := os.ReadFile(getContainerStartupProcessPidFile())
+	if err != nil {
+		return -1
+	}
+	pidStr := string(pidContent)
+	pidStr = strings.ReplaceAll(pidStr, "\n", "")
+	containerStartupProcessPid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return -1
+	}
+	return containerStartupProcessPid
+}
+
+// 检测容器中是否有进程在运行中
+func checkContainerProcessIsRunning() bool {
+	exitCode := util.RunCommandAndWait(GetRuncBin(), "--root", GetRuncStatePath(), "kill", getRuncProcessContainerName(), "0")
+	return exitCode == 0
+}
+
+// runc可执行文件
+func GetRuncBin() string {
+	return common.GetEtcRuncPath() + "/runc"
+}
+
+// runc进程状态保存目录
+func GetRuncStatePath() string {
+	return common.GetTmpRuncPath() + "/state"
+}
+
+// 获取当前部署目录启动容器标识
+func getRuncProcessContainerName() string {
+	return WebRunContainerName + GetCurrentPathEnvContainerSuffix()
+}
+
+// 发送强制退出信号到容器内进程
+func forceKillContainerProcess() int {
+	exitCode := util.RunCommandAndWait(GetRuncBin(), "--root", GetRuncStatePath(), "kill", "--all", getRuncProcessContainerName(), "SIGKILL")
+	if exitCode != 0 {
+		// 当命名空间内pid为1的进程退出后，内核会发送SIGKILL信号到该命名空间下所有进程
+		exitCode = util.RunCommandAndWait("kill", "-9", fmt.Sprintf("%d", getContainerStartupProcessRunningPid()))
+	}
+	return exitCode
 }
 
 // 停止启动的web容器
-func StopContainer()
-	d := docker.NewDockerClient()
+func StopContainer() bool {
 	webContainer := GetCurrentRunningWebContainer()
 	if webContainer == nil {
-		fmt.Println("没有容器在运行中！")
+		diary.Errorf("没有容器在运行中！")
 		return false
 	}
 
-	var timeOut time.Duration = 30
-
-	err := d.ContainerStop(context.TODO(), webContainer.ID, &timeOut)
-	if err == nil {
-		fmt.Printf("关闭容器（%v）成功，ID:（%v）\n", webContainer.Names, webContainer.ID)
-	} else {
-		fmt.Printf("关闭容器（%v）失败，ID:（%v）\n", webContainer.Names, webContainer.ID)
+	exitCode := util.RunCommandWithCli(GetRuncBin(), "--root", GetRuncStatePath(), "kill", "--all", webContainer.Name, "SIGTERM")
+	if exitCode != 0 {
+		diary.Errorf("向runc进程发送SIGTERM信号失败，exitCode：%v ", exitCode)
+		return false
 	}
 
+	beginStart := time.Now().Unix()
+	for {
+		if time.Now().Unix()-beginStart >= 10 {
+			forceKillContainerProcess()
+			diary.Warningf("关闭容器（%v）超时，发送强制退出SIGKILL信号！\n", webContainer.Name)
+			time.Sleep(time.Millisecond * 200)
+			break
+		}
+
+		if util.CheckProcessIsRunning(webContainer.Pid, "runc") || checkContainerProcessIsRunning() {
+			time.Sleep(time.Millisecond * 100)
+			continue
+		}
+
+		break
+	}
+
+	diary.Infof("关闭容器（%v）成功", webContainer.Name)
 	return true
-}
-
-// 删除web容器
-func RemoveWebContainer() bool {
-	webContainer := GetCurrentExistWebContainer()
-	if webContainer == nil {
-		fmt.Println("未找到对应容器！")
-		return false
-	}
-
-	if strings.Contains(webContainer.Status, "Up") {
-		fmt.Printf("容器（%s）正在运行中，无法自动删除，请先手动停止容器！\n", webContainer.Names)
-		return false
-	}
-
-	d := docker.NewDockerClient()
-	err := d.ContainerRemove(context.TODO(), webContainer.ID, types.ContainerRemoveOptions{Force: true})
-	if err != nil {
-		fmt.Printf("删除容器（%v）失败：%v \n", webContainer.ID, err)
-		return false
-	} else {
-		fmt.Println("容器删除成功：", webContainer.Names)
-		return true
-	}
 }
 
 // 获取部署目录使用的用户权限uid

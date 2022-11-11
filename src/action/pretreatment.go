@@ -18,7 +18,7 @@ var (
 // 根据一组宏值预处理
 // 每次预处理以不带 _active 后缀的分支开始
 // 将预处理后的文件变动提交的当前分支加 _active 后缀的分支
-func PreProcessMacros(vHostsMacros, webScriptMacros, startMacros ,runcConfMacros map[string]string) error {
+func PreProcessMacros(vHostsMacros, webScriptMacros, startMacros ,runcConfMacros , phpConfMacros map[string]string) error {
 	CheckAndCommitEtcChange()
 	etcPath := common.GetEtcPath()
 	currentBranch := gogit.GetRepositoryCurrentBranch(etcPath)
@@ -61,6 +61,15 @@ func PreProcessMacros(vHostsMacros, webScriptMacros, startMacros ,runcConfMacros
 		return existError
 	} else {
 		diary.Infof("处理替换nginx配置文件：%v", vHostsMacros)
+	}
+
+	phpConfPath := common.GetEtcPath() + "/php/php-fpm.d/"
+	existError = replaceDirectionMacros(phpConfPath, phpConfMacros)
+	if existError != nil {
+		diary.Errorf("处理phpfpm配置文件发生错误：%v，宏：%v", existError, phpConfMacros)
+		return existError
+	} else {
+		diary.Infof("处理替换phpfpm配置文件：%v", phpConfMacros)
 	}
 
 	webScriptPath := common.GetEtcPath() + "/web/"
